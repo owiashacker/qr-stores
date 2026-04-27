@@ -6,8 +6,10 @@
 Options -Indexes -MultiViews
 
 # --- Custom error pages ---
+# المسار يُعدّل تلقائياً عند الـ deploy على السيرفر (راجع .cpanel.yml)
 ErrorDocument 404 /qr_stores/404.php
 ErrorDocument 403 /qr_stores/404.php
+# DEPLOY_MARKER_404 — لا تحذف هذا التعليق، يستخدمه سكربت الـ deploy
 
 # --- DirectoryIndex so folders resolve to login.php instead of falling through to other apps ---
 DirectoryIndex index.php login.php

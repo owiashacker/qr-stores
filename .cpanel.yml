@@ -4,15 +4,6 @@ deployment:
     # ===========================================================
     # cPanel Git Auto-Deploy Configuration
     # ===========================================================
-    # عند الضغط على "Deploy HEAD Commit" في cPanel،
-    # هذه المهام تُنفَّذ بالترتيب لنشر الكود من repo إلى public_html.
-    #
-    # ملاحظات مهمّة:
-    # - config/db.php لن يُنسخ (مستثنى من Git) — يبقى كما هو على السيرفر
-    # - assets/uploads/* لن يُنسخ (يحتوي صور المستخدمين الفعلية)
-    # - إذا اسم المستخدم cPanel ليس "qrstores" — عدّل DEPLOYPATH
-    # ===========================================================
-
     - export DEPLOYPATH=/home/qrstores/public_html/
 
     # المجلدات الرئيسية
@@ -30,6 +21,17 @@ deployment:
     - /bin/cp -f demo.php $DEPLOYPATH
     - /bin/cp -f .htaccess $DEPLOYPATH
 
-    # ملفات config (بدون db.php الحسّاس)
+    # config/db.example.php (آمن) + .htaccess
+    # ملاحظة: config/db.php (الحسّاس) لن يُنسخ — يبقى كما هو على السيرفر
     - /bin/cp -f config/db.example.php $DEPLOYPATH/config/db.example.php
     - /bin/cp -f config/.htaccess $DEPLOYPATH/config/.htaccess
+
+    # ===========================================================
+    # Production fixes — تعديلات خاصة بالإنتاج
+    # ===========================================================
+    # 1. أصلح مسارات .htaccess (احذف /qr_stores prefix)
+    - /bin/sed -i 's|/qr_stores/404.php|/404.php|g' $DEPLOYPATH/.htaccess
+
+    # 2. تأكد من صلاحيات public_html
+    - /bin/chmod 755 $DEPLOYPATH
+    - /bin/chmod 644 $DEPLOYPATH/.htaccess
