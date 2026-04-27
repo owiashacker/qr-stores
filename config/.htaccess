@@ -1,0 +1,4 @@
+# Block all direct access to config folder
+Require all denied
+Order deny,allow
+Deny from all

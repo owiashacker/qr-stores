@@ -1,0 +1,66 @@
+# ============================================================
+# Sensitive — NEVER commit
+# ============================================================
+config/db.php
+config/.env
+.env
+.env.*
+!.env.example
+
+# ============================================================
+# User uploads (المحتوى الذي يرفعه أصحاب المتاجر)
+# ============================================================
+assets/uploads/items/*
+assets/uploads/media/*
+assets/uploads/logos/*
+assets/uploads/covers/*
+!assets/uploads/items/.gitkeep
+!assets/uploads/media/.gitkeep
+!assets/uploads/logos/.gitkeep
+!assets/uploads/covers/.gitkeep
+
+# ============================================================
+# Logs & errors
+# ============================================================
+logs/
+*.log
+error_log
+php_errors.log
+
+# ============================================================
+# IDE / Editor
+# ============================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ============================================================
+# OS
+# ============================================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================================
+# Build / Dependencies
+# ============================================================
+node_modules/
+vendor/
+composer.lock
+package-lock.json
+
+# ============================================================
+# Local-only working files
+# ============================================================
+_rebuild/
+_backup_pre_rebuild/
+video_scripts/
+*.zip
+*.rar
+*.7z
+*.bak
+*.sql
+test_db.php
+phpinfo.php

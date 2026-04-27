@@ -1,0 +1,72 @@
+# ============================================
+# QR Stores - Root .htaccess Security
+# ============================================
+
+# --- Disable directory listing ---
+Options -Indexes -MultiViews
+
+# --- Custom error pages ---
+ErrorDocument 404 /qr_stores/404.php
+ErrorDocument 403 /qr_stores/404.php
+
+# --- DirectoryIndex so folders resolve to login.php instead of falling through to other apps ---
+DirectoryIndex index.php login.php
+
+# --- Follow symlinks for rewriting ---
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Force HTTPS (uncomment in production)
+    # RewriteCond %{HTTPS} !=on
+    # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+
+    # Block null-byte and bad query strings
+    RewriteCond %{QUERY_STRING} (\<|%3C).*script.*(\>|%3E) [NC,OR]
+    RewriteCond %{QUERY_STRING} GLOBALS(=|\[|\%[0-9A-Z]{0,2}) [OR]
+    RewriteCond %{QUERY_STRING} _REQUEST(=|\[|\%[0-9A-Z]{0,2}) [OR]
+    RewriteCond %{QUERY_STRING} proc/self/environ [NC,OR]
+    RewriteCond %{QUERY_STRING} base64_(en|de)code[^(]*\([^)]*\) [NC]
+    RewriteRule ^(.*)$ - [F,L]
+
+    # Block access to sensitive file extensions anywhere in the tree
+    RewriteRule \.(sql|log|env|bak|backup|old|swp|dist|ini|conf|config|sh|bash)$ - [F,L]
+
+    # Block access to hidden files and VCS folders
+    RewriteRule (^|/)\.(?!well-known) - [F,L]
+</IfModule>
+
+# --- Security headers (fallback for non-PHP assets) ---
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+    Header always unset X-Powered-By
+    Header unset Server
+</IfModule>
+
+# --- Block direct access to dotfiles and sensitive files ---
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+<FilesMatch "\.(sql|md|log|ini|conf|env|bak|example|dist)$">
+    Require all denied
+</FilesMatch>
+
+# --- Disable server signature ---
+ServerSignature Off
+
+# --- Limit upload size (defense in depth) ---
+<IfModule mod_php.c>
+    php_value upload_max_filesize 5M
+    php_value post_max_size 6M
+    php_value max_input_time 60
+    php_value max_execution_time 60
+    php_flag expose_php off
+    php_flag display_errors off
+    php_flag log_errors on
+    php_flag session.cookie_httponly on
+    php_flag session.use_only_cookies on
+    php_value session.cookie_samesite "Lax"
+</IfModule>

@@ -1,0 +1,422 @@
+<?php
+require_once __DIR__ . '/../includes/functions.php';
+requireAdminLogin();
+$pageTitle = 'إدارة المطاعم';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
+    $action = $_POST['action'] ?? '';
+    $id = (int) ($_POST['id'] ?? 0);
+
+    if ($action === 'toggle_active' && $id) {
+        $pdo->prepare('UPDATE stores SET is_active = 1 - is_active WHERE id = ?')->execute([$id]);
+        flash('success', 'تم تحديث حالة المطعم');
+    } elseif ($action === 'change_plan' && $id) {
+        $planId = (int) ($_POST['plan_id'] ?? 0);
+        $expires = trim($_POST['expires'] ?? '');
+        $expiresAt = $expires ? date('Y-m-d H:i:s', strtotime($expires)) : null;
+        $pdo->prepare('UPDATE stores SET plan_id = ?, subscription_expires_at = ?, subscription_status = ? WHERE id = ?')
+            ->execute([$planId, $expiresAt, 'active', $id]);
+        flash('success', 'تم تحديث باقة المطعم');
+    } elseif ($action === 'delete' && $id) {
+        $pdo->prepare('DELETE FROM stores WHERE id = ?')->execute([$id]);
+        flash('success', 'تم حذف المطعم');
+    } elseif ($action === 'reset_password' && $id) {
+        // Super admin force-resets a store's password.
+        // Minimum 8 chars; confirmation must match.
+        $newPass     = (string) ($_POST['new_password'] ?? '');
+        $confirmPass = (string) ($_POST['confirm_password'] ?? '');
+
+        if (mb_strlen($newPass) < 8) {
+            flash('error', 'كلمة المرور يجب أن تكون 8 خانات على الأقل');
+        } elseif ($newPass !== $confirmPass) {
+            flash('error', 'كلمة المرور والتأكيد غير متطابقين');
+        } else {
+            // Capture store name for the confirmation message + activity log
+            $stmt = $pdo->prepare('SELECT name, email FROM stores WHERE id = ?');
+            $stmt->execute([$id]);
+            $store = $stmt->fetch();
+
+            if (!$store) {
+                flash('error', 'المتجر غير موجود');
+            } else {
+                $pdo->prepare('UPDATE stores SET password = ? WHERE id = ?')
+                    ->execute([password_hash($newPass, PASSWORD_DEFAULT), $id]);
+                log_activity_event('store_password_reset', ['store_id' => $id, 'store_name' => $store['name']]);
+                flash('success', 'تم إعادة تعيين كلمة المرور لمتجر «' . $store['name'] . '» بنجاح');
+            }
+        }
+    }
+    redirect(BASE_URL . '/super/stores.php' . (!empty($_GET['q']) ? '?q=' . urlencode($_GET['q']) : ''));
+}
+
+$search = trim($_GET['q'] ?? '');
+$planFilter = (int) ($_GET['plan'] ?? 0);
+$status = $_GET['status'] ?? '';
+
+$sql = 'SELECT r.*, p.name AS plan_name, p.code AS plan_code, p.price AS plan_price, (SELECT COUNT(*) FROM items WHERE store_id = r.id) AS items_count FROM stores r LEFT JOIN plans p ON r.plan_id = p.id WHERE 1=1';
+$params = [];
+if ($search) { $sql .= ' AND (r.name LIKE ? OR r.email LIKE ? OR r.slug LIKE ?)'; $params[] = "%$search%"; $params[] = "%$search%"; $params[] = "%$search%"; }
+if ($planFilter) { $sql .= ' AND r.plan_id = ?'; $params[] = $planFilter; }
+if ($status === 'active') $sql .= ' AND r.is_active = 1';
+elseif ($status === 'inactive') $sql .= ' AND r.is_active = 0';
+$sql .= ' ORDER BY r.created_at DESC';
+
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$stores = $stmt->fetchAll();
+
+// Mark expired subscriptions — they effectively operate as Free plan
+// (apply_expired_downgrade runs in PHP only; plan_id in DB stays for easy renewal)
+$now = time();
+foreach ($stores as &$rest) {
+    $exp = $rest['subscription_expires_at'] ?? null;
+    $rest['is_expired'] = $exp && strtotime($exp) <= $now;
+}
+unset($rest);
+
+$plans = $pdo->query('SELECT * FROM plans ORDER BY sort_order')->fetchAll();
+
+require __DIR__ . '/../includes/header_super.php';
+?>
+
+<!-- Filters -->
+<div class="card rounded-2xl p-4 mb-6">
+    <form method="GET" class="flex flex-col md:flex-row gap-3">
+        <div class="flex-1 relative">
+            <svg class="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <input type="text" name="q" value="<?= e($search) ?>" placeholder="ابحث عن مطعم..." class="w-full pr-10 pl-4 py-2.5 rounded-xl border-2 focus:border-emerald-500 transition">
+        </div>
+        <select name="plan" class="px-4 py-2.5 rounded-xl border-2 font-semibold">
+            <option value="0">كل الباقات</option>
+            <?php foreach ($plans as $p): ?>
+                <option value="<?= $p['id'] ?>" <?= $planFilter == $p['id'] ? 'selected' : '' ?>><?= e($p['name']) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <select name="status" class="px-4 py-2.5 rounded-xl border-2 font-semibold">
+            <option value="">كل الحالات</option>
+            <option value="active" <?= $status === 'active' ? 'selected' : '' ?>>نشط</option>
+            <option value="inactive" <?= $status === 'inactive' ? 'selected' : '' ?>>موقوف</option>
+        </select>
+        <button class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold">بحث</button>
+    </form>
+</div>
+
+<!-- Table -->
+<div class="card rounded-2xl overflow-hidden">
+    <div class="overflow-x-auto -webkit-overflow-scrolling-touch">
+    <table class="w-full min-w-[900px]">
+        <thead>
+            <tr class="bg-white/5 text-xs text-gray-400 border-b border-white/5">
+                <th class="text-right py-3 px-4 font-semibold">المطعم</th>
+                <th class="text-right py-3 px-4 font-semibold">البريد</th>
+                <th class="text-right py-3 px-4 font-semibold">الباقة</th>
+                <th class="text-right py-3 px-4 font-semibold">ينتهي في</th>
+                <th class="text-right py-3 px-4 font-semibold">الأصناف</th>
+                <th class="text-right py-3 px-4 font-semibold">المشاهدات</th>
+                <th class="text-right py-3 px-4 font-semibold">الحالة</th>
+                <th class="text-right py-3 px-4 font-semibold">التسجيل</th>
+                <th class="text-right py-3 px-4 font-semibold">إجراءات</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php if (!$stores): ?>
+                <tr><td colspan="9" class="text-center py-12 text-gray-500">لا توجد مطاعم</td></tr>
+            <?php else: ?>
+                <?php foreach ($stores as $rest):
+                    $badgeClass = ['free' => 'bg-gray-500/20 text-gray-300', 'pro' => 'bg-emerald-500/20 text-emerald-300', 'max' => 'bg-amber-500/20 text-amber-300'];
+                ?>
+                <tr class="border-b border-white/5 hover:bg-white/5">
+                    <td class="py-4 px-4">
+                        <div class="flex items-center gap-3">
+                            <?php if ($rest['logo']): ?>
+                                <img src="<?= BASE_URL ?>/assets/uploads/logos/<?= e($rest['logo']) ?>" class="w-10 h-10 rounded-lg object-cover">
+                            <?php else: ?>
+                                <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-white font-bold"><?= e(mb_substr($rest['name'], 0, 1)) ?></div>
+                            <?php endif; ?>
+                            <div>
+                                <p class="font-bold text-white text-sm"><?= e($rest['name']) ?></p>
+                                <p class="text-xs text-gray-500">/<?= e($rest['slug']) ?></p>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="py-4 px-4 text-sm text-gray-300"><?= e($rest['email']) ?></td>
+                    <td class="py-4 px-4">
+                        <?php if ($rest['is_expired']): ?>
+                            <div class="flex flex-col gap-1">
+                                <span class="px-2 py-1 rounded-lg text-xs font-bold bg-gray-500/20 text-gray-300">مجاني</span>
+                                <span class="text-[10px] text-red-400 font-bold">↓ انتهى <?= e($rest['plan_name'] ?? '') ?></span>
+                            </div>
+                        <?php else: ?>
+                            <span class="px-2 py-1 rounded-lg text-xs font-bold <?= $badgeClass[$rest['plan_code']] ?? 'bg-gray-500/20 text-gray-300' ?>"><?= e($rest['plan_name'] ?? '—') ?></span>
+                        <?php endif; ?>
+                    </td>
+                    <td class="py-4 px-4">
+                        <?php
+                        $exp = $rest['subscription_expires_at'];
+                        if (!$exp) {
+                            echo '<span class="text-xs text-gray-500">— دائم —</span>';
+                        } else {
+                            $expTs = strtotime($exp);
+                            $diff = $expTs - time();
+                            $daysLeft = floor($diff / 86400);
+                            if ($diff <= 0) {
+                                $color = 'text-red-400';
+                                $badge = '<span class="text-xs font-bold">منتهي</span>';
+                            } elseif ($daysLeft <= 7) {
+                                $color = 'text-amber-300';
+                                $badge = '<span class="text-xs font-bold">' . ($daysLeft > 0 ? "بعد $daysLeft يوم" : 'اليوم') . '</span>';
+                            } else {
+                                $color = 'text-emerald-300';
+                                $badge = '<span class="text-xs font-bold">بعد ' . $daysLeft . ' يوم</span>';
+                            }
+                            echo '<div class="' . $color . '">';
+                            echo '<div class="text-xs font-mono">' . date('Y-m-d H:i', $expTs) . '</div>';
+                            echo $badge;
+                            echo '</div>';
+                        }
+                        ?>
+                    </td>
+                    <td class="py-4 px-4 text-sm text-white font-semibold"><?= $rest['items_count'] ?></td>
+                    <td class="py-4 px-4">
+                        <div class="flex flex-col gap-0.5">
+                            <span class="inline-flex items-center gap-1.5 text-indigo-300 text-sm font-bold">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                <?= number_format((int)($rest['views_count'] ?? 0)) ?>
+                            </span>
+                            <span class="text-[10px] text-gray-500"><?= number_format((int)($rest['unique_views'] ?? 0)) ?> فريد</span>
+                        </div>
+                    </td>
+                    <td class="py-4 px-4">
+                        <?php if (!$rest['is_active']): ?>
+                            <span class="inline-flex items-center gap-1 text-gray-500 text-xs font-bold"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>موقوف</span>
+                        <?php elseif ($rest['is_expired']): ?>
+                            <span class="inline-flex items-center gap-1 text-red-400 text-xs font-bold"><span class="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span>منتهي</span>
+                        <?php else: ?>
+                            <span class="inline-flex items-center gap-1 text-emerald-400 text-xs font-bold"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>نشط</span>
+                        <?php endif; ?>
+                    </td>
+                    <td class="py-4 px-4 text-xs text-gray-500"><?= date('Y-m-d', strtotime($rest['created_at'])) ?></td>
+                    <td class="py-4 px-4">
+                        <div class="flex items-center gap-1">
+                            <a href="<?= BASE_URL ?>/public/store.php?r=<?= urlencode($rest['slug']) ?>" target="_blank" class="p-2 rounded-lg hover:bg-white/5 text-emerald-400" title="معاينة">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                            </a>
+                            <button onclick='openPlanModal(<?= json_encode(["id"=>$rest["id"],"name"=>$rest["name"],"plan_id"=>$rest["plan_id"],"expires"=>$rest["subscription_expires_at"]]) ?>)' class="p-2 rounded-lg hover:bg-white/5 text-blue-400" title="تغيير الباقة">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                            </button>
+                            <button onclick='openResetPwdModal(<?= json_encode(["id"=>$rest["id"],"name"=>$rest["name"],"email"=>$rest["email"]]) ?>)' class="p-2 rounded-lg hover:bg-white/5 text-amber-400" title="إعادة تعيين كلمة المرور">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                            </button>
+                            <form method="POST" class="inline">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="toggle_active">
+                                <input type="hidden" name="id" value="<?= $rest['id'] ?>">
+                                <button type="submit" class="p-2 rounded-lg hover:bg-white/5 text-gray-400" title="<?= $rest['is_active'] ? 'إيقاف' : 'تفعيل' ?>">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <?php if ($rest['is_active']): ?>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+                                        <?php else: ?>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                                        <?php endif; ?>
+                                    </svg>
+                                </button>
+                            </form>
+                            <form method="POST" class="inline" onsubmit="return confirm('حذف هذا المطعم وكل بياناته نهائياً؟')">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="id" value="<?= $rest['id'] ?>">
+                                <button type="submit" class="p-2 rounded-lg hover:bg-red-500/10 text-red-400" title="حذف">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                </button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<!-- Plan Modal -->
+<div id="planModal" class="fixed inset-0 bg-black/70 z-50 hidden items-center justify-center p-4" onclick="if(event.target===this)closePlanModal()">
+    <div class="card rounded-2xl w-full max-w-md">
+        <form method="POST">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="change_plan">
+            <input type="hidden" name="id" id="pm-id">
+            <div class="p-6 border-b border-white/5 flex items-center justify-between">
+                <h3 class="text-lg font-bold text-white">تغيير باقة <span id="pm-name"></span></h3>
+                <button type="button" onclick="closePlanModal()" class="p-1 hover:bg-white/5 rounded-lg text-gray-400">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="p-6 space-y-4">
+                <div>
+                    <label class="block text-sm font-semibold text-gray-300 mb-2">الباقة الجديدة</label>
+                    <select name="plan_id" id="pm-plan" required class="w-full px-4 py-3 rounded-xl border-2">
+                        <?php foreach ($plans as $p): ?>
+                            <option value="<?= $p['id'] ?>"><?= e($p['name']) ?> — $<?= (int) $p['price'] ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-gray-300 mb-2">تاريخ وساعة انتهاء الاشتراك</label>
+                    <input type="datetime-local" name="expires" id="pm-expires" step="60" class="w-full px-4 py-3 rounded-xl border-2">
+                    <div class="flex flex-wrap gap-2 mt-2">
+                        <button type="button" onclick="setExpiryPreset(30)" class="px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-bold text-gray-300">+30 يوم</button>
+                        <button type="button" onclick="setExpiryPreset(90)" class="px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-bold text-gray-300">+3 أشهر</button>
+                        <button type="button" onclick="setExpiryPreset(180)" class="px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-bold text-gray-300">+6 أشهر</button>
+                        <button type="button" onclick="setExpiryPreset(365)" class="px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-bold text-gray-300">+سنة</button>
+                        <button type="button" onclick="document.getElementById('pm-expires').value=''" class="px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-bold text-amber-300">دائم ∞</button>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-2">اتركه فارغاً للاشتراك الدائم (بدون انتهاء)</p>
+                </div>
+            </div>
+            <div class="p-6 border-t border-white/5 flex justify-end gap-3">
+                <button type="button" onclick="closePlanModal()" class="px-5 py-2.5 rounded-xl text-gray-400 hover:bg-white/5 font-semibold">إلغاء</button>
+                <button type="submit" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold">حفظ</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Reset Password Modal -->
+<div id="resetPwdModal" class="fixed inset-0 bg-black/70 z-50 hidden items-center justify-center p-4" onclick="if(event.target===this)closeResetPwdModal()">
+    <div class="card rounded-2xl w-full max-w-md">
+        <form method="POST" onsubmit="return validateResetPwd()">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="reset_password">
+            <input type="hidden" name="id" id="rp-id">
+            <div class="p-6 border-b border-white/5 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-white shadow-lg">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-white">إعادة تعيين كلمة المرور</h3>
+                        <p class="text-xs text-gray-500">لمتجر <span id="rp-name" class="text-amber-300 font-bold"></span></p>
+                    </div>
+                </div>
+                <button type="button" onclick="closeResetPwdModal()" class="p-1 hover:bg-white/5 rounded-lg text-gray-400">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="p-6 space-y-4">
+                <div class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 leading-relaxed flex items-start gap-2">
+                    <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <div>
+                        <p class="font-bold mb-0.5">تنبيه</p>
+                        <p>سيتم استبدال كلمة مرور المتجر الحالية. البريد المسجّل: <span id="rp-email" class="font-mono font-bold"></span></p>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-gray-300 mb-2">كلمة المرور الجديدة <span class="text-red-400">*</span></label>
+                    <input type="password" name="new_password" id="rp-new" required minlength="8" class="w-full px-4 py-3 rounded-xl border-2" placeholder="8 خانات على الأقل" autocomplete="new-password">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-gray-300 mb-2">تأكيد كلمة المرور <span class="text-red-400">*</span></label>
+                    <input type="password" name="confirm_password" id="rp-confirm" required minlength="8" class="w-full px-4 py-3 rounded-xl border-2" placeholder="أعد إدخال كلمة المرور" autocomplete="new-password">
+                    <p id="rp-mismatch" class="text-xs text-red-400 mt-1 hidden">كلمة المرور والتأكيد غير متطابقين</p>
+                </div>
+                <div class="flex items-center gap-2 text-xs text-gray-400">
+                    <label class="inline-flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="rp-show" onchange="toggleResetPwdVisibility()" class="w-3.5 h-3.5">
+                        <span>إظهار كلمة المرور</span>
+                    </label>
+                    <span class="mx-2 text-gray-600">|</span>
+                    <button type="button" onclick="generateResetPwd()" class="text-emerald-400 hover:text-emerald-300 font-semibold">🎲 توليد كلمة مرور قوية</button>
+                </div>
+            </div>
+            <div class="p-6 border-t border-white/5 flex justify-end gap-3">
+                <button type="button" onclick="closeResetPwdModal()" class="px-5 py-2.5 rounded-xl text-gray-400 hover:bg-white/5 font-semibold">إلغاء</button>
+                <button type="submit" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold shadow-lg">إعادة التعيين</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openPlanModal(data) {
+    document.getElementById('pm-id').value = data.id;
+    document.getElementById('pm-name').textContent = data.name;
+    document.getElementById('pm-plan').value = data.plan_id || '';
+    // Convert "YYYY-MM-DD HH:MM:SS" → "YYYY-MM-DDTHH:MM" for datetime-local input
+    document.getElementById('pm-expires').value = data.expires ? data.expires.replace(' ', 'T').substring(0, 16) : '';
+    document.getElementById('planModal').classList.remove('hidden');
+    document.getElementById('planModal').classList.add('flex');
+}
+function setExpiryPreset(days) {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    // Format to "YYYY-MM-DDTHH:MM" in local time
+    const pad = n => String(n).padStart(2, '0');
+    const val = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    document.getElementById('pm-expires').value = val;
+}
+function closePlanModal() {
+    document.getElementById('planModal').classList.add('hidden');
+    document.getElementById('planModal').classList.remove('flex');
+}
+
+// ----- Reset Password Modal -----
+function openResetPwdModal(data) {
+    document.getElementById('rp-id').value = data.id;
+    document.getElementById('rp-name').textContent = data.name;
+    document.getElementById('rp-email').textContent = data.email;
+    document.getElementById('rp-new').value = '';
+    document.getElementById('rp-confirm').value = '';
+    document.getElementById('rp-show').checked = false;
+    document.getElementById('rp-new').type = 'password';
+    document.getElementById('rp-confirm').type = 'password';
+    document.getElementById('rp-mismatch').classList.add('hidden');
+    document.getElementById('resetPwdModal').classList.remove('hidden');
+    document.getElementById('resetPwdModal').classList.add('flex');
+    setTimeout(() => document.getElementById('rp-new').focus(), 100);
+}
+function closeResetPwdModal() {
+    document.getElementById('resetPwdModal').classList.add('hidden');
+    document.getElementById('resetPwdModal').classList.remove('flex');
+}
+function toggleResetPwdVisibility() {
+    const show = document.getElementById('rp-show').checked;
+    document.getElementById('rp-new').type = show ? 'text' : 'password';
+    document.getElementById('rp-confirm').type = show ? 'text' : 'password';
+}
+function generateResetPwd() {
+    // 12-char password: 4 letters upper + 4 lowercase + 2 digits + 2 symbols, shuffled
+    const up = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const lo = 'abcdefghijkmnpqrstuvwxyz';
+    const di = '23456789';
+    const sy = '!@#$%&*';
+    const pick = (src, n) => Array.from({length: n}, () => src[Math.floor(Math.random()*src.length)]).join('');
+    const chars = (pick(up,4) + pick(lo,4) + pick(di,2) + pick(sy,2)).split('');
+    // Fisher-Yates shuffle
+    for (let i = chars.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [chars[i], chars[j]] = [chars[j], chars[i]];
+    }
+    const pwd = chars.join('');
+    document.getElementById('rp-new').value = pwd;
+    document.getElementById('rp-confirm').value = pwd;
+    // Show briefly so admin can copy it
+    document.getElementById('rp-show').checked = true;
+    toggleResetPwdVisibility();
+}
+function validateResetPwd() {
+    const n = document.getElementById('rp-new').value;
+    const c = document.getElementById('rp-confirm').value;
+    if (n.length < 8) {
+        alert('كلمة المرور يجب أن تكون 8 خانات على الأقل');
+        return false;
+    }
+    if (n !== c) {
+        document.getElementById('rp-mismatch').classList.remove('hidden');
+        return false;
+    }
+    return confirm('هل أنت متأكد من إعادة تعيين كلمة مرور هذا المتجر؟');
+}
+</script>
+
+<?php require __DIR__ . '/../includes/footer_super.php'; ?>

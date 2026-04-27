@@ -1,0 +1,237 @@
+/* ============================================================
+   QR MENU — Mobile Enhancements (global, purely additive)
+   ------------------------------------------------------------
+   Goal: improve small-screen display WITHOUT changing any
+   structure, layout, or feature. All rules are scoped to
+   phone widths (<=640px and <=480px) and tighten spacing /
+   typography / touch behaviour.
+
+   Loaded from: includes/header_admin.php,
+                includes/header_super.php,
+                public/menu.php (optional)
+   ============================================================ */
+
+/* ---------- Global safety: responsive media only ----------
+   NOTE: we intentionally do NOT set overflow-x:hidden on html/body
+   because it breaks position:sticky and smooth-scroll on iOS. */
+img, video { max-width: 100%; height: auto; }
+
+/* iOS momentum scroll on any horizontal scroller */
+.scrollbar-hide,
+[class*="overflow-x-auto"] {
+    -webkit-overflow-scrolling: touch;
+}
+
+/* ===========================================================
+   PHONES — up to 640px
+   =========================================================== */
+@media (max-width: 640px) {
+
+    /* --- Typography: shrink oversized hero/heading sizes --- */
+    .text-6xl { font-size: 2.75rem !important; line-height: 1.05 !important; }
+    .text-5xl { font-size: 2.25rem !important; line-height: 1.1 !important; }
+    .text-4xl { font-size: 1.875rem !important; line-height: 1.15 !important; }
+    .text-3xl { font-size: 1.5rem !important; line-height: 1.2 !important; }
+    .text-2xl { font-size: 1.25rem !important; line-height: 1.25 !important; }
+
+    /* --- Paddings: prevent wasted space in cards/banners --- */
+    .p-8 { padding: 1.25rem !important; }
+    .p-7 { padding: 1.125rem !important; }
+    .p-6 { padding: 1rem !important; }
+    .py-20 { padding-top: 3rem !important; padding-bottom: 3rem !important; }
+    .py-16 { padding-top: 2.5rem !important; padding-bottom: 2.5rem !important; }
+    .py-12 { padding-top: 2rem !important; padding-bottom: 2rem !important; }
+    .px-8 { padding-left: 1rem !important; padding-right: 1rem !important; }
+    .px-6 { padding-left: 0.875rem !important; padding-right: 0.875rem !important; }
+
+    /* --- Tighten excessive vertical gaps between blocks --- */
+    .mb-8 { margin-bottom: 1.25rem !important; }
+    .mb-6 { margin-bottom: 1rem !important; }
+    .space-y-10 > * + * { margin-top: 2rem !important; }
+    .space-y-8  > * + * { margin-top: 1.5rem !important; }
+
+    /* --- Rounded corners a bit smaller on phone --- */
+    .rounded-3xl { border-radius: 1.25rem !important; }
+
+    /* --- Form inputs: prevent iOS zoom on focus --- */
+    input, textarea, select {
+        font-size: 16px !important;
+    }
+
+    /* --- Buttons / links: ensure 40px min touch target --- */
+    button, a.inline-flex, a.flex {
+        min-height: auto;
+    }
+    button.inline-flex, a.inline-flex, button.flex, a.flex,
+    .btn, .cat-tab, .fav-btn, .add-btn {
+        touch-action: manipulation;
+    }
+
+    /* --- Tables: wrap in scrollable on mobile if not already --- */
+    table {
+        font-size: 0.875rem !important;
+    }
+    table th, table td {
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+    }
+
+    /* --- Modal dialogs: ensure content fits viewport --- */
+    [class*="max-w-md"],
+    [class*="max-w-lg"],
+    [class*="max-w-xl"] {
+        max-height: 92vh;
+    }
+
+    /* --- Grids: tighter gaps --- */
+    .gap-8 { gap: 1rem !important; }
+    .gap-6 { gap: 0.875rem !important; }
+    .gap-5 { gap: 0.75rem !important; }
+
+    /* --- Ensure 2-col stats grids stay readable --- */
+    .grid.grid-cols-2 > div {
+        min-width: 0;
+    }
+
+    /* --- Sticky headers: slightly more compact --- */
+    header.sticky,
+    nav.sticky {
+        backdrop-filter: blur(14px);
+    }
+
+    /* --- Hide decorative blurs that push beyond viewport --- */
+    .blur-3xl, .blur-2xl {
+        filter: blur(40px);
+    }
+}
+
+/* ===========================================================
+   NARROW PHONES — up to 480px (iPhone SE / small Androids)
+   =========================================================== */
+@media (max-width: 480px) {
+
+    /* Further shrink massive numbers in analytics cards */
+    .text-6xl { font-size: 2.25rem !important; }
+    .text-5xl { font-size: 1.875rem !important; }
+    .text-4xl { font-size: 1.625rem !important; }
+
+    /* Tight hero padding */
+    .p-6, .p-7, .p-8 { padding: 0.875rem !important; }
+
+    /* Table horizontal padding even tighter */
+    table th, table td {
+        padding-left: 0.5rem !important;
+        padding-right: 0.5rem !important;
+        font-size: 0.8125rem !important;
+    }
+
+    /* Badges / pills: don't wrap awkwardly */
+    .whitespace-nowrap { white-space: nowrap; }
+}
+
+/* ===========================================================
+   TABLE RESPONSIVE WRAPPER
+   Any <table> inside .table-responsive gets horizontal scroll
+   =========================================================== */
+.table-responsive {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.table-responsive > table {
+    min-width: 600px;
+}
+
+/* ===========================================================
+   ADMIN / SUPER SIDEBAR — smoother mobile interactions
+   =========================================================== */
+@media (max-width: 768px) {
+    /* Ensure topbar feels solid and doesn't overflow */
+    header .flex.items-center.justify-between {
+        flex-wrap: nowrap;
+    }
+
+    /* Hamburger button — bigger tap target */
+    header button[onclick*="toggleSidebar"] {
+        min-width: 40px;
+        min-height: 40px;
+    }
+
+    /* Page content: trim ultra-wide default padding */
+    main > div.p-4.md\:p-8 {
+        padding: 0.875rem !important;
+    }
+
+    /* Banners inside content: tighter on phone */
+    .rounded-3xl.p-6,
+    .rounded-3xl.p-8 {
+        padding: 1rem !important;
+    }
+}
+
+/* ===========================================================
+   LANDING / INDEX HERO — prevent giant text overflow on phones
+   =========================================================== */
+@media (max-width: 640px) {
+    section.hero h1,
+    section.hero .hero-title,
+    .hero-title {
+        font-size: clamp(1.75rem, 8vw, 2.5rem) !important;
+        line-height: 1.1 !important;
+    }
+}
+
+/* ===========================================================
+   PUBLIC MENU — customer-facing polish
+   =========================================================== */
+@media (max-width: 640px) {
+    /* Cover hero: shorter on phone to show content faster */
+    header > .h-60.md\:h-96 {
+        height: 13rem !important;
+    }
+
+    /* Restaurant info card overlap: less negative margin to stay visible */
+    .-mt-20, .-mt-24 { margin-top: -3.5rem !important; }
+
+    /* Featured carousel cards: fit two-ish per viewport on narrow */
+    .item-card.w-52 { width: 11rem !important; }
+
+    /* Floating watermark badge: smaller on phone */
+    a.fixed.bottom-4.left-4 {
+        padding: 0.375rem 0.625rem !important;
+        font-size: 0.6875rem !important;
+    }
+
+    /* Cart FAB: safe-area aware (iOS notch/home bar) */
+    .cart-fab {
+        bottom: calc(1rem + env(safe-area-inset-bottom, 0px)) !important;
+    }
+
+    /* Body bottom padding for safe-area */
+    body.min-h-screen.pb-24 {
+        padding-bottom: calc(6rem + env(safe-area-inset-bottom, 0px)) !important;
+    }
+}
+
+/* ===========================================================
+   MODAL ITEM DETAILS — customer menu modal
+   =========================================================== */
+@media (max-width: 640px) {
+    /* Ensure modal hero image not too tall on small screens */
+    .modal-hero-img {
+        max-height: 40vh !important;
+    }
+
+    /* Modal body padding a bit tighter */
+    .modal-body {
+        padding: 1rem !important;
+    }
+
+    /* Ensure CTA row wraps gracefully */
+    .modal-cta-row {
+        flex-wrap: wrap;
+    }
+    .modal-cta-row > * {
+        flex: 1 1 100%;
+    }
+}

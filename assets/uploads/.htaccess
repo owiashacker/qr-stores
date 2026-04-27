@@ -1,0 +1,22 @@
+# Prevent PHP execution in upload directories (critical for security)
+<FilesMatch "\.(php|phtml|php3|php4|php5|php7|phps|pht|phar|inc|cgi|pl|py|rb|asp|aspx|jsp)$">
+    Require all denied
+    Order deny,allow
+    Deny from all
+</FilesMatch>
+
+# Only allow images
+<FilesMatch "\.(jpg|jpeg|png|gif|webp|svg)$">
+    Require all granted
+</FilesMatch>
+
+# Disable all server-side processing here
+Options -ExecCGI -Indexes
+RemoveHandler .php .phtml .php3 .php4 .php5 .php7 .phps
+RemoveType .php .phtml .php3 .php4 .php5 .php7 .phps
+AddType text/plain .php .phtml .php3 .php4 .php5 .php7 .phps
+
+# Force download instead of rendering for suspicious files
+<FilesMatch "\.(htaccess|htpasswd|ini|log|sh|inc|bak)$">
+    Require all denied
+</FilesMatch>
