@@ -119,7 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
 
     <p class="text-center mt-6 text-xs text-gray-500">
-        <a href="<?= BASE_URL ?>" class="hover:text-gray-300">← العودة للموقع</a>
+        <a href="<?= BASE_URL ?>/" class="hover:text-gray-300">← العودة للموقع</a>
     </p>
 </div>
 </body>

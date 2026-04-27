@@ -1363,7 +1363,7 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
 <!-- Footer -->
 <footer class="mt-16 py-8 text-center text-sm text-gray-400 container max-w-5xl mx-auto px-4">
     <?php if ($showWatermark): ?>
-        <a href="<?= BASE_URL ?>" target="_blank" class="inline-flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-soft hover:shadow-md transition">
+        <a href="<?= BASE_URL ?>/" target="_blank" class="inline-flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-soft hover:shadow-md transition">
             <span>متجر إلكتروني بواسطة</span>
             <span class="font-bold text-primary"><?= e($watermarkText) ?></span>
         </a>
@@ -1372,7 +1372,7 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
 
 <?php if ($showWatermark): ?>
 <!-- Floating Watermark Badge -->
-<a href="<?= BASE_URL ?>" target="_blank" class="fixed bottom-4 left-4 z-30 flex items-center gap-2 px-3 py-2 rounded-full bg-white/95 backdrop-blur shadow-lg text-xs text-gray-600 hover:text-gray-900 transition">
+<a href="<?= BASE_URL ?>/" target="_blank" class="fixed bottom-4 left-4 z-30 flex items-center gap-2 px-3 py-2 rounded-full bg-white/95 backdrop-blur shadow-lg text-xs text-gray-600 hover:text-gray-900 transition">
     <div class="w-5 h-5 rounded-md gradient-primary flex items-center justify-center text-white font-black text-[10px]">Q</div>
     <span class="font-bold"><?= e($watermarkText) ?></span>
 </a>

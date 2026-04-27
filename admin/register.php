@@ -234,7 +234,7 @@ foreach ($businessTypes as $t) {
     </div>
 
     <p class="text-center mt-6 text-xs text-gray-400">
-        <a href="<?= BASE_URL ?>" class="hover:text-gray-600">← العودة للصفحة الرئيسية</a>
+        <a href="<?= BASE_URL ?>/" class="hover:text-gray-600">← العودة للصفحة الرئيسية</a>
     </p>
 </div>
 

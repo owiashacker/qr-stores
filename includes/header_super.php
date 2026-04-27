@@ -194,7 +194,7 @@ try {
                         </svg>
                         <span class="font-medium">حسابي</span>
                     </a>
-                    <a href="<?= BASE_URL ?>" target="_blank" class="flex items-center gap-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-white/5 transition-all">
+                    <a href="<?= BASE_URL ?>/" target="_blank" class="flex items-center gap-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-white/5 transition-all">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                         </svg>
