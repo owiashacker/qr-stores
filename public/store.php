@@ -155,6 +155,71 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
         * { -webkit-tap-highlight-color: transparent; }
         *:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
         html { scroll-behavior: smooth; scroll-padding-top: 140px; }
+
+        /* ===== Custom Scrollbar — branded with store color ===== */
+        /* Firefox */
+        html {
+            scrollbar-color: var(--primary) rgba(0,0,0,0.04);
+            scrollbar-width: thin;
+        }
+        /* Webkit (Chrome, Edge, Safari) */
+        ::-webkit-scrollbar {
+            width: 12px;
+            height: 12px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.03);
+            border-radius: 999px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, var(--primary) 0%, var(--primary-dark) 100%);
+            border-radius: 999px;
+            border: 2px solid rgba(255,255,255,0.6);
+            background-clip: padding-box;
+            box-shadow: 0 0 12px var(--primary-glow), inset 0 0 4px rgba(255,255,255,0.3);
+            transition: all .2s;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(180deg, var(--primary-dark) 0%, var(--primary) 100%);
+            box-shadow: 0 0 18px var(--primary), inset 0 0 6px rgba(255,255,255,0.5);
+            border-width: 1px;
+        }
+        ::-webkit-scrollbar-thumb:active {
+            background: var(--primary);
+            box-shadow: 0 0 24px var(--primary), 0 0 4px var(--primary-glow);
+        }
+        ::-webkit-scrollbar-corner { background: transparent; }
+
+        /* Sparkles that fly off the scrollbar on scroll — soft & subtle */
+        .scroll-sparkle {
+            position: fixed;
+            pointer-events: none;
+            z-index: 99999;
+            font-size: 11px;
+            color: var(--primary);
+            opacity: 0.55;
+            text-shadow: 0 0 4px var(--primary-glow);
+            animation-name: sparkleFly;
+            animation-duration: 1400ms;
+            animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+            animation-fill-mode: forwards;
+            will-change: transform, opacity;
+            user-select: none;
+            line-height: 1;
+        }
+        @keyframes sparkleFly {
+            0%   { transform: translate(0, 0) scale(0)    rotate(0deg);   opacity: 0; }
+            20%  { transform: translate(0, 0) scale(0.9)  rotate(40deg);  opacity: 0.55; }
+            100% { transform: translate(-45px, -18px) scale(0.15) rotate(360deg); opacity: 0; }
+        }
+        [dir="rtl"] .scroll-sparkle {
+            animation-name: sparkleFlyRTL;
+        }
+        @keyframes sparkleFlyRTL {
+            0%   { transform: translate(0, 0) scale(0)    rotate(0deg);   opacity: 0; }
+            20%  { transform: translate(0, 0) scale(0.9)  rotate(40deg);  opacity: 0.55; }
+            100% { transform: translate(45px, -18px) scale(0.15) rotate(360deg); opacity: 0; }
+        }
         body {
             font-family: 'Cairo', system-ui, sans-serif;
             background:
@@ -179,6 +244,16 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
         .bg-primary-soft { background: var(--primary-soft); }
         .border-primary { border-color: var(--primary); }
 
+        /* Cover wrap — natural aspect ratio image */
+        .cover-wrap {
+            min-height: 180px; /* مساحة كافية للـ stats حتى لو الصورة قصيرة جداً */
+        }
+        .cover-wrap img {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
         /* Cover gradient */
         .cover-gradient {
             background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.2) 40%, rgba(0,0,0,0.75) 100%);
@@ -188,6 +263,11 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
         .cat-tab {
             transition: all .25s cubic-bezier(0.4, 0, 0.2, 1);
             position: relative;
+            min-height: 40px;
+            line-height: 1;
+            flex-shrink: 0 !important;
+            width: max-content !important;
+            box-sizing: border-box !important;
         }
         .cat-tab:hover { transform: translateY(-1px); border-color: var(--primary); }
         .cat-tab.active {
@@ -200,6 +280,33 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
         .cat-tab.active::after {
             content: ''; position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%);
             width: 6px; height: 6px; border-radius: 50%; background: var(--primary);
+        }
+        /* Count badge in category tab */
+        .cat-tab .cat-count {
+            display: inline-flex !important;
+            align-items: center;
+            justify-content: center;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 5px;
+            font-size: 10px;
+            font-weight: 800;
+            border-radius: 999px;
+            background: rgba(0,0,0,0.08);
+            color: #475569;
+            line-height: 1;
+            position: static !important;
+            top: auto !important;
+            left: auto !important;
+            right: auto !important;
+            transform: none !important;
+            flex-shrink: 0;
+            align-self: center;
+            vertical-align: middle;
+        }
+        .cat-tab.active .cat-count {
+            background: rgba(255,255,255,0.25);
+            color: white;
         }
 
         /* Item card — premium polished */
@@ -835,11 +942,21 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255,255,255,0.25);
             color: white;
-            padding: 4px 12px;
+            padding: 4px 10px;
             border-radius: 999px;
             font-size: 11px;
             font-weight: 700;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.2px;
+            white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        @media (max-width: 480px) {
+            .stat-pill {
+                font-size: 10.5px;
+                padding: 3px 9px;
+            }
         }
 
         @supports not (background: color-mix(in srgb, red, blue)) {
@@ -1083,63 +1200,65 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
 
 <!-- Hero / Cover -->
 <header class="relative">
-    <div class="h-60 md:h-96 relative overflow-hidden">
+    <div class="cover-wrap relative">
         <?php if ($r['cover']): ?>
-            <img src="<?= BASE_URL ?>/assets/uploads/covers/<?= e($r['cover']) ?>" class="absolute inset-0 w-full h-full object-cover scale-105">
+            <!-- Cover image: full natural aspect ratio, never cropped -->
+            <img src="<?= BASE_URL ?>/assets/uploads/covers/<?= e($r['cover']) ?>" class="block w-full h-auto" alt="<?= e($r['name']) ?>">
         <?php else: ?>
-            <div class="absolute inset-0 gradient-primary"></div>
-            <div class="absolute inset-0 opacity-30" style="background-image: radial-gradient(circle at 20% 50%, white 0%, transparent 50%), radial-gradient(circle at 80% 80%, white 0%, transparent 50%), radial-gradient(circle at 50% 0%, white 0%, transparent 60%);"></div>
-            <!-- Decorative shapes for empty cover -->
-            <div class="absolute top-8 right-8 w-24 h-24 rounded-full bg-white/10 blur-2xl"></div>
-            <div class="absolute bottom-12 left-12 w-32 h-32 rounded-full bg-white/10 blur-3xl"></div>
+            <!-- No cover: gradient placeholder with fixed responsive height -->
+            <div class="h-56 sm:h-72 md:h-96 relative gradient-primary overflow-hidden">
+                <div class="absolute inset-0 opacity-30" style="background-image: radial-gradient(circle at 20% 50%, white 0%, transparent 50%), radial-gradient(circle at 80% 80%, white 0%, transparent 50%), radial-gradient(circle at 50% 0%, white 0%, transparent 60%);"></div>
+                <div class="absolute top-8 right-8 w-24 h-24 rounded-full bg-white/10 blur-2xl"></div>
+                <div class="absolute bottom-12 left-12 w-32 h-32 rounded-full bg-white/10 blur-3xl"></div>
+            </div>
         <?php endif; ?>
-        <div class="absolute inset-0 cover-gradient"></div>
+        <div class="absolute inset-0 cover-gradient pointer-events-none"></div>
 
         <!-- Stats badges in hero -->
         <div class="absolute bottom-4 right-0 left-0 container max-w-5xl mx-auto px-4">
             <div class="flex gap-2 flex-wrap justify-center md:justify-start">
                 <?php $totalCats = count(array_filter($cats, fn($c) => !empty($itemsByCategory[$c['id']]))); ?>
                 <?php if ($totalCats > 0): ?>
-                    <span class="stat-pill">📋 <?= $totalCats ?> <?= e($publicLabelCat) ?></span>
+                    <span class="stat-pill">📋 <?= $totalCats ?> <?= e($totalCats === 1 ? $publicLabelCat : $publicLabelCats) ?></span>
                 <?php endif; ?>
                 <?php if (count($allItems) > 0): ?>
-                    <span class="stat-pill"><?= e(bizLabel($r, 'icon')) ?> <?= count($allItems) ?> <?= e($publicLabelItem) ?></span>
+                    <span class="stat-pill"><?= e(bizLabel($r, 'icon')) ?> <?= count($allItems) ?> <?= e(count($allItems) === 1 ? $publicLabelItem : $publicLabelItems) ?></span>
                 <?php endif; ?>
                 <?php if (count($featured) > 0): ?>
                     <span class="stat-pill">⭐ <?= count($featured) ?> مميّز</span>
                 <?php endif; ?>
                 <?php if ($r['working_hours']): ?>
-                    <span class="stat-pill">🕒 <?= e($r['working_hours']) ?></span>
+                    <span class="stat-pill hidden sm:inline-flex">🕒 <?= e($r['working_hours']) ?></span>
                 <?php endif; ?>
             </div>
         </div>
     </div>
 
     <!-- Store Info Overlap -->
-    <div class="container max-w-5xl mx-auto px-4 relative -mt-20 md:-mt-24">
-        <div class="glass rounded-3xl shadow-elev p-5 md:p-7 flex items-center gap-4 md:gap-6 border border-white/50">
+    <div class="container max-w-5xl mx-auto px-4 relative -mt-16 sm:-mt-20 md:-mt-24">
+        <div class="glass rounded-3xl shadow-elev p-4 sm:p-5 md:p-7 flex items-center gap-3 sm:gap-4 md:gap-6 border border-white/50">
             <?php if ($r['logo']): ?>
                 <div class="relative flex-shrink-0">
                     <div class="absolute -inset-1 gradient-primary rounded-2xl blur opacity-30"></div>
-                    <img src="<?= BASE_URL ?>/assets/uploads/logos/<?= e($r['logo']) ?>" class="relative w-20 h-20 md:w-28 md:h-28 rounded-2xl object-cover shadow-xl border-2 border-white">
+                    <img src="<?= BASE_URL ?>/assets/uploads/logos/<?= e($r['logo']) ?>" class="relative w-16 h-16 sm:w-20 sm:h-20 md:w-28 md:h-28 rounded-2xl object-cover shadow-xl border-2 border-white">
                 </div>
             <?php else: ?>
                 <div class="relative flex-shrink-0">
                     <div class="absolute -inset-1 gradient-primary rounded-2xl blur opacity-30"></div>
-                    <div class="relative w-20 h-20 md:w-28 md:h-28 rounded-2xl gradient-primary flex items-center justify-center text-white font-black text-3xl md:text-5xl shadow-xl border-2 border-white">
+                    <div class="relative w-16 h-16 sm:w-20 sm:h-20 md:w-28 md:h-28 rounded-2xl gradient-primary flex items-center justify-center text-white font-black text-2xl sm:text-3xl md:text-5xl shadow-xl border-2 border-white">
                         <?= e(mb_substr($r['name'], 0, 1)) ?>
                     </div>
                 </div>
             <?php endif; ?>
             <div class="flex-1 min-w-0">
-                <h1 class="text-xl md:text-3xl font-black text-gray-900 leading-tight mb-1 truncate"><?= e($r['name']) ?></h1>
+                <h1 class="text-lg sm:text-xl md:text-3xl font-black text-gray-900 leading-tight mb-1.5 break-words"><?= e($r['name']) ?></h1>
                 <?php if ($r['description']): ?>
-                    <p class="text-sm md:text-base text-gray-600 line-clamp-2 leading-relaxed"><?= e($r['description']) ?></p>
+                    <p class="text-[13px] sm:text-sm md:text-base text-gray-600 line-clamp-2 leading-relaxed"><?= e($r['description']) ?></p>
                 <?php endif; ?>
                 <?php if ($r['address']): ?>
-                    <p class="text-xs text-gray-500 mt-2 flex items-center gap-1.5">
-                        <svg class="w-3.5 h-3.5 text-primary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                        <span class="truncate"><?= e($r['address']) ?></span>
+                    <p class="text-[12px] sm:text-xs text-gray-500 mt-2 flex items-start gap-1.5 leading-snug">
+                        <svg class="w-4 h-4 sm:w-3.5 sm:h-3.5 text-primary flex-shrink-0 mt-px" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                        <span class="line-clamp-2"><?= e($r['address']) ?></span>
                     </p>
                 <?php endif; ?>
             </div>
@@ -1211,10 +1330,10 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
                 <?php if (!empty($itemsByCategory[$cat['id']])):
                     $count = count($itemsByCategory[$cat['id']]);
                 ?>
-                    <a href="#cat-<?= $cat['id'] ?>" data-cat-id="<?= $cat['id'] ?>" class="cat-tab <?= $i === 0 ? 'active' : '' ?> inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-gray-100 text-gray-700 font-bold text-sm whitespace-nowrap">
+                    <a href="#cat-<?= $cat['id'] ?>" data-cat-id="<?= $cat['id'] ?>" class="cat-tab <?= $i === 0 ? 'active' : '' ?> inline-flex items-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl bg-white border border-gray-100 text-gray-700 font-bold text-sm whitespace-nowrap">
                         <?= renderCategoryIcon($cat['icon'], $r['biz_code'] ?? 'restaurant', 'w-5 h-5', $cat['name']) ?>
                         <span><?= e($cat['name']) ?></span>
-                        <span class="text-[10px] opacity-60 font-black">(<?= $count ?>)</span>
+                        <span class="cat-count"><?= $count ?></span>
                     </a>
                 <?php endif; ?>
             <?php endforeach; ?>
@@ -1972,6 +2091,48 @@ window.addEventListener('scroll', onScroll, { passive: true });
 document.addEventListener('keydown', e => {
     if (e.key === 'Escape') { closeItem(); closeCart(); }
 });
+
+/* ============================================================
+   Sparkles flying off the scrollbar on scroll — soft & subtle
+   Exposed to window.spawnSparkle for manual testing.
+   ============================================================ */
+(function () {
+    const SPARKLE_CHARS = ['✦', '✧', '✨'];
+    const isRTL = document.documentElement.dir === 'rtl';
+    let lastY = window.scrollY;
+    let cooldownUntil = 0;
+
+    function spawnSparkle() {
+        const s = document.createElement('div');
+        s.className = 'scroll-sparkle';
+        s.textContent = SPARKLE_CHARS[(Math.random() * SPARKLE_CHARS.length) | 0];
+
+        const edge = isRTL
+            ? (2 + Math.random() * 14)
+            : (window.innerWidth - 16 - Math.random() * 14);
+        s.style.left = edge + 'px';
+        s.style.top  = (40 + Math.random() * (window.innerHeight - 80)) + 'px';
+        s.style.fontSize = (9 + Math.random() * 4).toFixed(1) + 'px';
+
+        document.body.appendChild(s);
+        setTimeout(() => s.remove(), 1500);
+    }
+
+    window.spawnSparkle = spawnSparkle;
+
+    function onScroll() {
+        const now = performance.now();
+        if (now < cooldownUntil) return;
+        const delta = Math.abs(window.scrollY - lastY);
+        lastY = window.scrollY;
+        // Higher threshold = fewer triggers; emit only one sparkle per burst
+        if (delta > 40) {
+            spawnSparkle();
+            cooldownUntil = now + 350; // ~3 sparkles/sec maximum
+        }
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+})();
 
 /* ============================================================
    INTERACTIVE LAYER: Cart • Favorites • Search • Share • Reveal
