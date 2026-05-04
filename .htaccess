@@ -35,6 +35,16 @@ DirectoryIndex index.php login.php
 
     # Block access to hidden files and VCS folders
     RewriteRule (^|/)\.(?!well-known) - [F,L]
+
+    # ─── Silence common scanner / hack-attempt requests ──────────────
+    # These return a clean 410 (Gone) without logging — reduces error log noise
+    # from bots probing for WordPress, phpMyAdmin, .env files, etc.
+    RewriteRule ^(wp-login|wp-admin|wp-includes|wp-content|wp-config|xmlrpc)\.php?$ - [G,L]
+    RewriteRule ^wp-(login|admin|includes|content)/ - [G,L]
+    RewriteRule ^(phpmyadmin|pma|phpMyAdmin|mysql|adminer|administrator|admin\.php)/?$ - [G,L]
+    RewriteRule ^(boaform|cgi-bin|owa|autodiscover|fckeditor)/ - [G,L]
+    RewriteRule ^\.env(\..+)?$ - [G,L]
+    RewriteRule ^(setup|install|backup|backups|database|db|sql|dump|backup\.sql)/?$ - [G,L]
 </IfModule>
 
 # --- Security headers (fallback for non-PHP assets) ---

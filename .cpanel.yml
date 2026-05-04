@@ -22,6 +22,8 @@ deployment:
     - /bin/cp -f 404.php $DEPLOYPATH
     - /bin/cp -f demo.php $DEPLOYPATH
     - /bin/cp -f .htaccess $DEPLOYPATH
+    - /bin/cp -f robots.txt $DEPLOYPATH
+    - /bin/cp -f ads.txt $DEPLOYPATH
 
     # config/db.example.php (آمن) + .htaccess
     # ملاحظة: config/db.php (الحسّاس) لن يُنسخ — يبقى كما هو على السيرفر
