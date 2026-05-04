@@ -17,6 +17,35 @@ $businessTypes = $pdo->query(
     'SELECT id, code, name_ar, icon FROM business_types WHERE is_active = 1 ORDER BY sort_order'
 )->fetchAll();
 
+// ─── Affiliate referral capture ────────────────────────────────────────────
+// 1. ?ref=CODE in URL → save to a 30-day cookie + look up the affiliate
+// 2. On POST, link the new store to the affiliate via affiliate_id + referred_at
+$referringAffiliate = null;
+$incomingRefCode = null;
+if (!empty($_GET['ref'])) {
+    $incomingRefCode = strtoupper(preg_replace('/[^A-Z0-9]/i', '', (string) $_GET['ref']));
+}
+if (!$incomingRefCode && !empty($_COOKIE['qrs_ref'])) {
+    $incomingRefCode = strtoupper(preg_replace('/[^A-Z0-9]/i', '', (string) $_COOKIE['qrs_ref']));
+}
+
+if ($incomingRefCode) {
+    $stmt = $pdo->prepare('SELECT id, name, referral_code, commission_rate FROM affiliates WHERE referral_code = ? AND is_active = 1 LIMIT 1');
+    $stmt->execute([$incomingRefCode]);
+    $referringAffiliate = $stmt->fetch();
+
+    // Persist the cookie if we just got it from URL (or refresh expiration)
+    if ($referringAffiliate && empty($_COOKIE['qrs_ref'])) {
+        setcookie('qrs_ref', $referringAffiliate['referral_code'], [
+            'expires'  => time() + (30 * 86400),
+            'path'     => '/',
+            'samesite' => 'Lax',
+            'secure'   => !empty($_SERVER['HTTPS']),
+            'httponly' => true,
+        ]);
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (honeypot_triggered()) {
         security_log($pdo, 'honeypot_triggered', 'warning', 'register', 'store');
@@ -58,12 +87,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $freePlan = (int) $pdo->query("SELECT id FROM plans WHERE code = 'free' LIMIT 1")->fetchColumn();
             $slug = generateUniqueSlug($pdo, $name);
             $hash = hash_password($password);
-            $stmt = $pdo->prepare('INSERT INTO stores (business_type_id, name, slug, email, password, phone, plan_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
-            $stmt->execute([$businessTypeId, $name, $slug, $email, $hash, $phone, $freePlan ?: 1]);
+
+            // Affiliate link (if user came through ?ref=CODE)
+            $affId = $referringAffiliate['id'] ?? null;
+            $referredAt = $affId ? date('Y-m-d H:i:s') : null;
+
+            $stmt = $pdo->prepare('INSERT INTO stores (business_type_id, name, slug, email, password, phone, plan_id, affiliate_id, referred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+            $stmt->execute([$businessTypeId, $name, $slug, $email, $hash, $phone, $freePlan ?: 1, $affId, $referredAt]);
             $newId = (int) $pdo->lastInsertId();
             regenerate_session_id();
             $_SESSION['store_id'] = $newId;
-            security_log($pdo, 'store_registered', 'info', ['email' => $email, 'business_type_id' => $businessTypeId], 'store', $newId);
+            security_log($pdo, 'store_registered', 'info',
+                ['email' => $email, 'business_type_id' => $businessTypeId, 'affiliate_id' => $affId],
+                'store', $newId);
+            // Clear the ref cookie since it's now consumed
+            if ($affId) {
+                setcookie('qrs_ref', '', ['expires' => time() - 3600, 'path' => '/']);
+            }
             flash('success', 'مرحباً بك! ابدأ بإنشاء متجرك — يمكنك الترقية لاحقاً.');
             redirect(BASE_URL . '/admin/dashboard.php');
         } else {
@@ -124,6 +164,22 @@ foreach ($businessTypes as $t) {
 <div class="blob w-64 h-64 sm:w-96 sm:h-96 bg-teal-300 -bottom-10 -left-10 sm:-bottom-20 sm:-left-20"></div>
 
 <div class="relative z-10 w-full max-w-2xl mx-auto">
+
+    <?php if ($referringAffiliate): ?>
+        <!-- Affiliate referral badge — shown when user came via ?ref=CODE -->
+        <div class="mb-4 p-4 rounded-2xl bg-gradient-to-l from-orange-100 to-amber-100 border-2 border-orange-300 flex items-center gap-3 shadow">
+            <div class="w-11 h-11 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center flex-shrink-0 shadow">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+                <p class="text-xs font-bold text-orange-700 uppercase tracking-wider">دعوة من وسيط</p>
+                <p class="text-sm font-bold text-gray-900 truncate">أنت مدعوّ من قِبل: <span class="text-orange-700"><?= e($referringAffiliate['name']) ?></span></p>
+            </div>
+        </div>
+    <?php endif; ?>
+
     <div class="bg-white rounded-3xl shadow-2xl p-6 sm:p-8 md:p-10">
 
         <?php if ($errors): ?>

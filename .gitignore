@@ -57,6 +57,7 @@ package-lock.json
 _rebuild/
 _backup_pre_rebuild/
 video_scripts/
+video_v2/
 *.zip
 *.rar
 *.7z

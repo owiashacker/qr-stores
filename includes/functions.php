@@ -270,6 +270,7 @@ function categoryIconPalette($r)
         'electronics' => ['💻','🖥️','📱','📷','📹','🎥','🎤','🎧','🎮','🕹️','⌚','📺','📻','🎙️','🔌','🔋','💡','💿','📀','💾','📟','🖨️','🖱️','⌨️','📡','🛜','🔦','🧯','⚡','🔧'],
         'appliances'  => ['🔌','🔋','💡','🚿','🛁','🛋️','🛏️','🪑','🪞','🪟','🪠','🧺','🧹','🧽','🧴','🪒','🧼','❄️','🔥','🌡️','⏰','🕰️','🔑','📦','🪣','🛒','🗑️','🧊','🧯','🪜'],
         'cars'        => ['🚗','🚙','🚕','🏎️','🚓','🚑','🚒','🚐','🛻','🚚','🚛','🚜','🏍️','🛵','🚲','🛴','🛺','🚌','🚎','⛽','🔧','🔩','🛞','🪫','🔋','🚨','🏁','🛠️','🔑','🗝️'],
+        'bookstore'   => ['📚','📖','📕','📗','📘','📙','📓','📔','📒','📰','🗞️','📜','📃','📄','📑','✏️','🖊️','🖋️','✒️','📝','📐','📏','🔖','🏷️','🎓','🌍','🌎','🔬','🔭','🧮'],
     ];
     return $palettes[$code] ?? $palettes['restaurant'];
 }
@@ -576,6 +577,129 @@ function currentAdmin($pdo)
     $stmt = $pdo->prepare('SELECT * FROM admins WHERE id = ? AND is_active = 1');
     $stmt->execute([$_SESSION['admin_id']]);
     return $stmt->fetch();
+}
+
+// =========================================
+// AFFILIATE / BROKER — auth helpers
+// =========================================
+
+/**
+ * Redirect to affiliate login if no affiliate session.
+ * Called at the top of every affiliate/* page.
+ */
+function requireAffiliateLogin()
+{
+    if (empty($_SESSION['affiliate_id'])) {
+        redirect(BASE_URL . '/affiliate/login.php');
+    }
+}
+
+/**
+ * Get the currently logged-in affiliate row (or null if not logged in / inactive).
+ */
+function currentAffiliate($pdo)
+{
+    if (empty($_SESSION['affiliate_id'])) return null;
+    $stmt = $pdo->prepare('SELECT * FROM affiliates WHERE id = ? AND is_active = 1 LIMIT 1');
+    $stmt->execute([$_SESSION['affiliate_id']]);
+    $a = $stmt->fetch();
+    if (!$a) {
+        // Affiliate was deactivated/deleted — clean session
+        unset($_SESSION['affiliate_id']);
+        return null;
+    }
+    return $a;
+}
+
+/**
+ * Generate a unique short referral code (e.g. "AHM4D2").
+ * 6-8 alphanumeric chars, uppercase, no ambiguous chars (0/O, 1/I).
+ */
+function generateUniqueReferralCode(PDO $pdo, int $length = 6): string
+{
+    $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no O,I,0,1
+    $stmt = $pdo->prepare('SELECT 1 FROM affiliates WHERE referral_code = ? LIMIT 1');
+    for ($attempt = 0; $attempt < 50; $attempt++) {
+        $code = '';
+        for ($i = 0; $i < $length; $i++) {
+            $code .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+        }
+        $stmt->execute([$code]);
+        if (!$stmt->fetch()) return $code;
+    }
+    // Extremely unlikely fallback — extend length
+    return generateUniqueReferralCode($pdo, $length + 1);
+}
+
+/**
+ * Build the public referral URL for an affiliate code.
+ * Used in the dashboard to copy/share.
+ */
+function affiliateReferralUrl(string $code): string
+{
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host   = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    return $scheme . '://' . $host . BASE_URL . '/admin/register.php?ref=' . urlencode($code);
+}
+
+/**
+ * Resolve the effective commission rate for a store ↔ affiliate pair.
+ *
+ *   1. If the super-admin set a per-store override (stores.affiliate_commission_rate),
+ *      use that.
+ *   2. Otherwise fall back to the affiliate's default rate (affiliates.commission_rate).
+ *
+ * Returns NULL if no affiliate is set or invalid IDs.
+ */
+function resolveAffiliateRate(PDO $pdo, ?int $affiliateId, $storeOverride): ?float
+{
+    if (!$affiliateId) return null;
+    if ($storeOverride !== null && $storeOverride !== '') {
+        return max(0.0, min(100.0, (float) $storeOverride));
+    }
+    $stmt = $pdo->prepare('SELECT commission_rate FROM affiliates WHERE id = ? LIMIT 1');
+    $stmt->execute([$affiliateId]);
+    $rate = $stmt->fetchColumn();
+    return $rate === false ? null : (float) $rate;
+}
+
+/**
+ * Look up affiliate context for a payment about to be created.
+ *   - If $explicitAffiliateId > 0 → use it (super-admin manually picked an affiliate)
+ *   - If $explicitAffiliateId is null/0 → fall back to the store's saved affiliate_id
+ *
+ * Returns: ['affiliate_id' => ?int, 'rate' => ?float, 'amount' => ?float]
+ *
+ * The amount is calculated as: payment_amount × (rate / 100).
+ * All three values are NULL when no affiliate applies.
+ */
+function affiliateContextForPayment(PDO $pdo, int $storeId, ?int $explicitAffiliateId, float $paymentAmount): array
+{
+    $affId = $explicitAffiliateId ?: null;
+    $storeOverride = null;
+
+    // Need the store's saved affiliate even if super picked one — to compare overrides
+    $stmt = $pdo->prepare('SELECT affiliate_id, affiliate_commission_rate FROM stores WHERE id = ? LIMIT 1');
+    $stmt->execute([$storeId]);
+    $row = $stmt->fetch();
+
+    if (!$affId && $row && $row['affiliate_id']) {
+        $affId = (int) $row['affiliate_id'];
+        $storeOverride = $row['affiliate_commission_rate'];
+    } elseif ($affId && $row && (int) $row['affiliate_id'] === $affId) {
+        // Same affiliate as stored — honor the per-store override
+        $storeOverride = $row['affiliate_commission_rate'];
+    }
+
+    $rate = resolveAffiliateRate($pdo, $affId, $storeOverride);
+    if ($affId === null || $rate === null) {
+        return ['affiliate_id' => null, 'rate' => null, 'amount' => null];
+    }
+    return [
+        'affiliate_id' => $affId,
+        'rate'         => $rate,
+        'amount'       => round($paymentAmount * $rate / 100, 2),
+    ];
 }
 
 function formatPrice($price, $currency = 'ل.س')

@@ -20,6 +20,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
     } elseif ($action === 'delete' && $id) {
         $pdo->prepare('DELETE FROM stores WHERE id = ?')->execute([$id]);
         flash('success', 'تم حذف المطعم');
+    } elseif ($action === 'change_affiliate' && $id) {
+        $affId = (int) ($_POST['affiliate_id'] ?? 0);
+        $rate  = trim($_POST['affiliate_commission_rate'] ?? '');
+        $rateVal = ($rate === '') ? null : max(0, min(100, (float) $rate));
+        $newAffId = $affId > 0 ? $affId : null;
+        // If linking to an affiliate for the first time, set referred_at to now
+        $stmt = $pdo->prepare('SELECT affiliate_id, referred_at FROM stores WHERE id = ?');
+        $stmt->execute([$id]);
+        $cur = $stmt->fetch();
+        $referredAt = $cur['referred_at'] ?: null;
+        if ($newAffId && !$cur['affiliate_id']) {
+            $referredAt = date('Y-m-d H:i:s');
+        } elseif (!$newAffId) {
+            $referredAt = null; // unlinking → clear timestamp
+        }
+        $pdo->prepare('UPDATE stores SET affiliate_id = ?, affiliate_commission_rate = ?, referred_at = ? WHERE id = ?')
+            ->execute([$newAffId, $rateVal, $referredAt, $id]);
+        log_activity_event('store_affiliate_changed', ['store_id' => $id, 'affiliate_id' => $newAffId, 'rate' => $rateVal]);
+        flash('success', $newAffId ? 'تم ربط المتجر بالوسيط' : 'تم فكّ ارتباط المتجر بالوسيط');
     } elseif ($action === 'reset_password' && $id) {
         // Super admin force-resets a store's password.
         // Minimum 8 chars; confirmation must match.
@@ -52,18 +71,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
 $search = trim($_GET['q'] ?? '');
 $planFilter = (int) ($_GET['plan'] ?? 0);
 $status = $_GET['status'] ?? '';
+$affFilter = (int) ($_GET['affiliate'] ?? 0); // 0 = all, -1 = no affiliate, >0 = specific
 
-$sql = 'SELECT r.*, p.name AS plan_name, p.code AS plan_code, p.price AS plan_price, (SELECT COUNT(*) FROM items WHERE store_id = r.id) AS items_count FROM stores r LEFT JOIN plans p ON r.plan_id = p.id WHERE 1=1';
+$sql = 'SELECT r.*, p.name AS plan_name, p.code AS plan_code, p.price AS plan_price,
+        (SELECT COUNT(*) FROM items WHERE store_id = r.id) AS items_count,
+        a.name AS affiliate_name, a.referral_code AS affiliate_code, a.commission_rate AS affiliate_default_rate
+        FROM stores r
+        LEFT JOIN plans p ON r.plan_id = p.id
+        LEFT JOIN affiliates a ON a.id = r.affiliate_id
+        WHERE 1=1';
 $params = [];
 if ($search) { $sql .= ' AND (r.name LIKE ? OR r.email LIKE ? OR r.slug LIKE ?)'; $params[] = "%$search%"; $params[] = "%$search%"; $params[] = "%$search%"; }
 if ($planFilter) { $sql .= ' AND r.plan_id = ?'; $params[] = $planFilter; }
 if ($status === 'active') $sql .= ' AND r.is_active = 1';
 elseif ($status === 'inactive') $sql .= ' AND r.is_active = 0';
+if ($affFilter > 0) { $sql .= ' AND r.affiliate_id = ?'; $params[] = $affFilter; }
+elseif ($affFilter === -1) { $sql .= ' AND r.affiliate_id IS NULL'; }
 $sql .= ' ORDER BY r.created_at DESC';
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $stores = $stmt->fetchAll();
+
+// Load all affiliates for filter dropdown + change-affiliate modal
+$allAffiliates = $pdo->query('SELECT id, name, referral_code, commission_rate FROM affiliates WHERE is_active = 1 ORDER BY name')->fetchAll();
 
 // Mark expired subscriptions — they effectively operate as Free plan
 // (apply_expired_downgrade runs in PHP only; plan_id in DB stays for easy renewal)
@@ -97,6 +128,15 @@ require __DIR__ . '/../includes/header_super.php';
             <option value="active" <?= $status === 'active' ? 'selected' : '' ?>>نشط</option>
             <option value="inactive" <?= $status === 'inactive' ? 'selected' : '' ?>>موقوف</option>
         </select>
+        <select name="affiliate" class="px-4 py-2.5 rounded-xl border-2 font-semibold">
+            <option value="0">كل المتاجر (وسطاء)</option>
+            <option value="-1" <?= $affFilter === -1 ? 'selected' : '' ?>>بدون وسيط</option>
+            <?php foreach ($allAffiliates as $af): ?>
+                <option value="<?= (int) $af['id'] ?>" <?= $affFilter === (int) $af['id'] ? 'selected' : '' ?>>
+                    <?= e($af['name']) ?> (<?= e($af['referral_code']) ?>)
+                </option>
+            <?php endforeach; ?>
+        </select>
         <button class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold">بحث</button>
     </form>
 </div>
@@ -110,6 +150,7 @@ require __DIR__ . '/../includes/header_super.php';
                 <th class="text-right py-3 px-4 font-semibold">المطعم</th>
                 <th class="text-right py-3 px-4 font-semibold">البريد</th>
                 <th class="text-right py-3 px-4 font-semibold">الباقة</th>
+                <th class="text-right py-3 px-4 font-semibold">الوسيط</th>
                 <th class="text-right py-3 px-4 font-semibold">ينتهي في</th>
                 <th class="text-right py-3 px-4 font-semibold">الأصناف</th>
                 <th class="text-right py-3 px-4 font-semibold">المشاهدات</th>
@@ -120,7 +161,7 @@ require __DIR__ . '/../includes/header_super.php';
         </thead>
         <tbody>
             <?php if (!$stores): ?>
-                <tr><td colspan="9" class="text-center py-12 text-gray-500">لا توجد مطاعم</td></tr>
+                <tr><td colspan="10" class="text-center py-12 text-gray-500">لا توجد مطاعم</td></tr>
             <?php else: ?>
                 <?php foreach ($stores as $rest):
                     $badgeClass = ['free' => 'bg-gray-500/20 text-gray-300', 'pro' => 'bg-emerald-500/20 text-emerald-300', 'max' => 'bg-amber-500/20 text-amber-300'];
@@ -148,6 +189,30 @@ require __DIR__ . '/../includes/header_super.php';
                             </div>
                         <?php else: ?>
                             <span class="px-2 py-1 rounded-lg text-xs font-bold <?= $badgeClass[$rest['plan_code']] ?? 'bg-gray-500/20 text-gray-300' ?>"><?= e($rest['plan_name'] ?? '—') ?></span>
+                        <?php endif; ?>
+                    </td>
+                    <td class="py-4 px-4">
+                        <?php if ($rest['affiliate_name']): ?>
+                            <button type="button"
+                                    onclick='openAffiliateModal(<?= json_encode([
+                                        'id' => (int) $rest['id'],
+                                        'name' => $rest['name'],
+                                        'affiliate_id' => (int) $rest['affiliate_id'],
+                                        'affiliate_commission_rate' => $rest['affiliate_commission_rate'],
+                                        'affiliate_default_rate' => $rest['affiliate_default_rate'],
+                                    ], JSON_UNESCAPED_UNICODE | JSON_HEX_APOS) ?>)'
+                                    class="text-right block hover:bg-white/5 rounded-lg p-1 -m-1 transition">
+                                <p class="text-xs font-bold text-orange-400 truncate max-w-[120px]" title="<?= e($rest['affiliate_name']) ?>"><?= e($rest['affiliate_name']) ?></p>
+                                <p class="text-[10px] text-gray-500 font-mono"><?= e($rest['affiliate_code']) ?>
+                                    · <?= number_format((float) ($rest['affiliate_commission_rate'] ?? $rest['affiliate_default_rate']), 1) ?>%
+                                </p>
+                            </button>
+                        <?php else: ?>
+                            <button type="button"
+                                    onclick='openAffiliateModal(<?= json_encode(['id' => (int) $rest['id'], 'name' => $rest['name'], 'affiliate_id' => 0, 'affiliate_commission_rate' => null, 'affiliate_default_rate' => null], JSON_UNESCAPED_UNICODE | JSON_HEX_APOS) ?>)'
+                                    class="text-xs text-gray-500 hover:text-orange-400 transition">
+                                + إضافة وسيط
+                            </button>
                         <?php endif; ?>
                     </td>
                     <td class="py-4 px-4">
@@ -417,6 +482,79 @@ function validateResetPwd() {
     }
     return confirm('هل أنت متأكد من إعادة تعيين كلمة مرور هذا المتجر؟');
 }
+
+// ─── Affiliate change modal (lazy DOM lookup — modal HTML comes after this script) ────
+const affDefaultRates = <?= json_encode(array_column($allAffiliates, 'commission_rate', 'id')) ?>;
+
+function openAffiliateModal(s) {
+    const modal = document.getElementById('changeAffiliateModal');
+    if (!modal) { console.error('changeAffiliateModal not found in DOM'); return; }
+    document.getElementById('aff_store_id').value = s.id;
+    document.getElementById('aff_store_name').textContent = s.name;
+    document.getElementById('aff_select').value = s.affiliate_id || '';
+    document.getElementById('aff_rate').value = s.affiliate_commission_rate || '';
+    updateAffHelp();
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+function closeAffiliateModal() {
+    const modal = document.getElementById('changeAffiliateModal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+function updateAffHelp() {
+    const sel = document.getElementById('aff_select');
+    const help = document.getElementById('aff_default_help');
+    if (!sel || !help) return;
+    const id = sel.value;
+    if (id && affDefaultRates[id] !== undefined) {
+        help.textContent = 'النسبة الافتراضية لهذا الوسيط: ' + parseFloat(affDefaultRates[id]).toFixed(2) + '% (اتركه فارغاً لاستخدامها)';
+        help.classList.remove('hidden');
+    } else {
+        help.classList.add('hidden');
+    }
+}
 </script>
+
+<!-- Affiliate change modal -->
+<div id="changeAffiliateModal" class="fixed inset-0 bg-black/70 z-50 hidden items-center justify-center p-4" onclick="if(event.target===this)closeAffiliateModal()">
+    <div class="bg-gray-900 border border-white/10 rounded-2xl p-6 max-w-md w-full">
+        <h3 class="text-lg font-black text-white mb-1">ربط بوسيط</h3>
+        <p class="text-sm text-gray-400 mb-5">المتجر: <span id="aff_store_name" class="text-orange-400 font-bold"></span></p>
+
+        <form method="POST" class="space-y-4">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="change_affiliate">
+            <input type="hidden" name="id" id="aff_store_id" value="">
+
+            <div>
+                <label class="block text-sm font-bold text-gray-300 mb-2">الوسيط</label>
+                <select name="affiliate_id" id="aff_select" onchange="updateAffHelp()"
+                        class="w-full px-4 py-2.5 rounded-xl bg-white/5 border-2 border-white/10 text-white">
+                    <option value="">— بدون وسيط —</option>
+                    <?php foreach ($allAffiliates as $af): ?>
+                        <option value="<?= (int) $af['id'] ?>">
+                            <?= e($af['name']) ?> (<?= e($af['referral_code']) ?>) — <?= number_format((float) $af['commission_rate'], 2) ?>%
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm font-bold text-gray-300 mb-2">نسبة العمولة لهذا المتجر تحديداً (%)</label>
+                <input type="number" name="affiliate_commission_rate" id="aff_rate"
+                       min="0" max="100" step="0.01" placeholder="اتركه فارغاً للقيمة الافتراضية"
+                       class="w-full px-4 py-2.5 rounded-xl bg-white/5 border-2 border-white/10 text-white">
+                <p id="aff_default_help" class="text-xs text-gray-500 mt-2 hidden"></p>
+            </div>
+
+            <div class="flex items-center justify-end gap-2 pt-3 border-t border-white/10">
+                <button type="button" onclick="closeAffiliateModal()" class="px-4 py-2 rounded-xl text-gray-400 hover:text-white">إلغاء</button>
+                <button type="submit" class="px-5 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 text-white font-bold">حفظ</button>
+            </div>
+        </form>
+    </div>
+</div>
 
 <?php require __DIR__ . '/../includes/footer_super.php'; ?>

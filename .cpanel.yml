@@ -10,7 +10,9 @@ deployment:
     - /bin/cp -Rf admin $DEPLOYPATH
     - /bin/cp -Rf super $DEPLOYPATH
     - /bin/cp -Rf public $DEPLOYPATH
+    - /bin/cp -Rf affiliate $DEPLOYPATH
     - /bin/cp -Rf includes $DEPLOYPATH
+    - /bin/cp -Rf migrations $DEPLOYPATH
     - /bin/cp -Rf assets/css $DEPLOYPATH/assets/
     - /bin/cp -Rf assets/icons $DEPLOYPATH/assets/
     - /bin/cp -Rf assets/lib $DEPLOYPATH/assets/

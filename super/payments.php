@@ -19,11 +19,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
         $paidAt  = trim($_POST['paid_at'] ?? '');
         $paidAt  = $paidAt ? date('Y-m-d H:i:s', strtotime($paidAt)) : date('Y-m-d H:i:s');
 
+        // Payment kind:
+        //   'past'   = recording a previous payment, no plan changes
+        //   'new'    = new subscription / renewal → upgrade the store's plan + extend expiry
+        $paymentKind = ($_POST['payment_kind'] ?? 'past') === 'new' ? 'new' : 'past';
+
+        // Affiliate selection — super-admin can override or unset per payment
+        $affChoice = (string) ($_POST['affiliate_id'] ?? 'auto');
+        $explicitAff = null;
+        $skipAffiliate = false;
+        if ($affChoice === '') {
+            $skipAffiliate = true;
+        } elseif ($affChoice !== 'auto' && (int) $affChoice > 0) {
+            $explicitAff = (int) $affChoice;
+        }
+
         // Snapshot plan period/currency at the moment of the payment.
         $period = null;
         $currency = 'USD';
+        $planRow = null;
         if ($planId) {
-            $pStmt = $pdo->prepare('SELECT period, currency FROM plans WHERE id = ?');
+            $pStmt = $pdo->prepare('SELECT * FROM plans WHERE id = ?');
             $pStmt->execute([$planId]);
             $planRow = $pStmt->fetch();
             if ($planRow) {
@@ -34,14 +50,96 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
 
         if (!$storeId || $amount <= 0) {
             flash('error', 'يجب اختيار المطعم وإدخال مبلغ صحيح');
+        } elseif ($paymentKind === 'new' && !$planId) {
+            flash('error', 'لاشتراك جديد، يجب اختيار الباقة');
         } else {
-            $pdo->prepare('INSERT INTO payments (store_id, plan_id, amount, currency, period, payment_method, payment_reference, notes, paid_at, recorded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            // Compute affiliate commission unless explicitly skipped
+            $aff = $skipAffiliate
+                ? ['affiliate_id' => null, 'rate' => null, 'amount' => null]
+                : affiliateContextForPayment($pdo, $storeId, $explicitAff, $amount);
+
+            $pdo->prepare('INSERT INTO payments (store_id, plan_id, amount, currency, period, payment_method, payment_reference, notes, paid_at, recorded_by, affiliate_id, affiliate_commission_rate, affiliate_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
                 ->execute([
                     $storeId, $planId, $amount, $currency, $period,
                     $method ?: null, $ref ?: null, $notes ?: null, $paidAt,
                     $_SESSION['admin_id'],
+                    $aff['affiliate_id'], $aff['rate'], $aff['amount'],
                 ]);
-            flash('success', 'تم تسجيل الدفعة');
+
+            $msg = 'تم تسجيل الدفعة';
+
+            // ═══ NEW SUBSCRIPTION: upgrade the store's plan + extend expiry ═══
+            if ($paymentKind === 'new' && $planRow) {
+                $newExpiry = null;
+                $expirySource = 'auto'; // 'manual' | 'auto' | 'permanent'
+
+                // Did the super-admin enter a manual expiry? Always wins.
+                $manualExpiry = trim($_POST['subscription_expires_at'] ?? '');
+                if ($manualExpiry !== '') {
+                    $ts = strtotime($manualExpiry);
+                    if ($ts) {
+                        $newExpiry = date('Y-m-d H:i:s', $ts);
+                        $expirySource = 'manual';
+                    }
+                }
+
+                // No manual entry → auto-compute based on plan period
+                // (extending from current expiry if still active)
+                if ($expirySource === 'auto') {
+                    $stmt = $pdo->prepare('SELECT subscription_expires_at FROM stores WHERE id = ?');
+                    $stmt->execute([$storeId]);
+                    $currentExpiry = $stmt->fetchColumn();
+
+                    $startTs = $paidAt ? strtotime($paidAt) : time();
+                    if ($currentExpiry && strtotime($currentExpiry) > $startTs) {
+                        $startTs = strtotime($currentExpiry); // extend, not reset
+                    }
+
+                    $period = $planRow['period'] ?? 'monthly';
+                    if ($period === 'monthly') {
+                        $newExpiry = date('Y-m-d H:i:s', strtotime('+1 month', $startTs));
+                    } elseif ($period === 'yearly') {
+                        $newExpiry = date('Y-m-d H:i:s', strtotime('+1 year', $startTs));
+                    } else {
+                        // 'forever' or anything else → permanent
+                        $expirySource = 'permanent';
+                    }
+                }
+
+                $pdo->prepare('UPDATE stores SET plan_id = ?, subscription_expires_at = ?, subscription_status = ? WHERE id = ?')
+                    ->execute([$planId, $newExpiry, 'active', $storeId]);
+
+                log_activity_event('store_plan_upgraded_via_payment', [
+                    'store_id'      => $storeId,
+                    'plan_id'       => $planId,
+                    'plan_code'     => $planRow['code'] ?? '',
+                    'expires_at'    => $newExpiry,
+                    'expiry_source' => $expirySource,
+                ]);
+
+                $expiryMsg = $newExpiry
+                    ? ' حتى ' . date('Y-m-d H:i', strtotime($newExpiry))
+                      . ($expirySource === 'manual' ? ' (تاريخ يدوي)' : '')
+                    : ' (دائم)';
+                $msg .= ' — تم ترقية المتجر إلى «' . ($planRow['name'] ?? '') . '»' . $expiryMsg;
+            }
+
+            if ($aff['affiliate_id']) {
+                $msg .= ' — عمولة الوسيط: ' . number_format((float) $aff['amount']) . ' (' . number_format((float) $aff['rate'], 2) . '%)';
+            }
+            flash('success', $msg);
+        }
+    } elseif ($action === 'mark_affiliate_paid') {
+        $id = (int) ($_POST['id'] ?? 0);
+        if ($id) {
+            $pdo->prepare('UPDATE payments SET affiliate_paid = 1, affiliate_paid_at = NOW() WHERE id = ?')->execute([$id]);
+            flash('success', 'تم تسجيل دفع العمولة للوسيط');
+        }
+    } elseif ($action === 'unmark_affiliate_paid') {
+        $id = (int) ($_POST['id'] ?? 0);
+        if ($id) {
+            $pdo->prepare('UPDATE payments SET affiliate_paid = 0, affiliate_paid_at = NULL WHERE id = ?')->execute([$id]);
+            flash('success', 'تم إلغاء حالة دفع العمولة');
         }
     } elseif ($action === 'delete') {
         $id = (int) ($_POST['id'] ?? 0);
@@ -85,11 +183,13 @@ $filterTo      = trim($_GET['to'] ?? '');
 
 $sql = "SELECT pay.*, s.name AS store_name, s.slug AS store_slug,
                pl.name AS plan_name, pl.code AS plan_code,
-               a.name AS admin_name
+               a.name AS admin_name,
+               af.name AS affiliate_name, af.referral_code AS affiliate_code
         FROM payments pay
         LEFT JOIN stores s ON pay.store_id = s.id
         LEFT JOIN plans pl ON pay.plan_id  = pl.id
         LEFT JOIN admins a ON pay.recorded_by = a.id
+        LEFT JOIN affiliates af ON af.id = pay.affiliate_id
         WHERE 1=1";
 $params = [];
 
@@ -122,8 +222,9 @@ $grandCount = (int)   $pdo->query("SELECT COUNT(*) FROM payments")->fetchColumn(
 // -----------------------------------------------------------------------------
 // Data for dropdowns
 // -----------------------------------------------------------------------------
-$storesList = $pdo->query('SELECT id, name FROM stores ORDER BY name')->fetchAll();
+$storesList = $pdo->query('SELECT s.id, s.name, s.affiliate_id, a.name AS affiliate_name, a.referral_code AS affiliate_code, a.commission_rate AS affiliate_default_rate, s.affiliate_commission_rate AS affiliate_store_rate FROM stores s LEFT JOIN affiliates a ON a.id = s.affiliate_id ORDER BY s.name')->fetchAll();
 $plansList  = $pdo->query('SELECT id, name, price, period, currency FROM plans WHERE is_active = 1 ORDER BY sort_order, price')->fetchAll();
+$affiliatesList = $pdo->query('SELECT id, name, referral_code, commission_rate FROM affiliates WHERE is_active = 1 ORDER BY name')->fetchAll();
 
 // Method labels/icons
 $methodIcons  = ['whatsapp' => '💬', 'bank_transfer' => '🏦', 'cash' => '💵', 'other' => '💳'];
@@ -216,6 +317,7 @@ require __DIR__ . '/../includes/header_super.php';
                         <th class="py-3 px-4">الباقة</th>
                         <th class="py-3 px-4">المبلغ</th>
                         <th class="py-3 px-4">الطريقة</th>
+                        <th class="py-3 px-4">الوسيط / العمولة</th>
                         <th class="py-3 px-4">المرجع / ملاحظات</th>
                         <th class="py-3 px-4">سجّلها</th>
                         <th class="py-3 px-4 text-center">إجراء</th>
@@ -254,6 +356,36 @@ require __DIR__ . '/../includes/header_super.php';
                                     <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 text-xs font-semibold text-gray-200"><?= $mIcon ?> <?= e($mLabel) ?></span>
                                 <?php else: ?>
                                     <span class="text-gray-500">—</span>
+                                <?php endif; ?>
+                            </td>
+                            <td class="py-3 px-4 whitespace-nowrap">
+                                <?php if ($p['affiliate_id']): ?>
+                                    <div class="flex items-center gap-2">
+                                        <div class="text-xs">
+                                            <p class="font-bold text-orange-400 truncate max-w-[120px]" title="<?= e($p['affiliate_name'] ?? '') ?>"><?= e($p['affiliate_name'] ?? 'وسيط محذوف') ?></p>
+                                            <p class="text-amber-300 font-bold">
+                                                <?= number_format((float) $p['affiliate_amount'], 2) ?>
+                                                <span class="text-gray-500 font-normal">(<?= number_format((float) $p['affiliate_commission_rate'], 1) ?>%)</span>
+                                            </p>
+                                        </div>
+                                        <?php if ($p['affiliate_paid']): ?>
+                                            <form method="POST" class="inline" onsubmit="return confirm('إلغاء حالة الدفع للوسيط؟')">
+                                                <?= csrfField() ?>
+                                                <input type="hidden" name="action" value="unmark_affiliate_paid">
+                                                <input type="hidden" name="id" value="<?= (int) $p['id'] ?>">
+                                                <button type="submit" class="px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-400 text-[10px] font-bold" title="مدفوع — اضغط للإلغاء">✓ مدفوع</button>
+                                            </form>
+                                        <?php else: ?>
+                                            <form method="POST" class="inline" onsubmit="return confirm('تأكيد دفع العمولة للوسيط؟')">
+                                                <?= csrfField() ?>
+                                                <input type="hidden" name="action" value="mark_affiliate_paid">
+                                                <input type="hidden" name="id" value="<?= (int) $p['id'] ?>">
+                                                <button type="submit" class="px-2 py-1 rounded-lg bg-orange-500/20 text-orange-400 text-[10px] font-bold hover:bg-orange-500/30" title="ضع علامة كمدفوع">دفع</button>
+                                            </form>
+                                        <?php endif; ?>
+                                    </div>
+                                <?php else: ?>
+                                    <span class="text-gray-500 text-xs">—</span>
                                 <?php endif; ?>
                             </td>
                             <td class="py-3 px-4 max-w-xs">
@@ -312,22 +444,86 @@ require __DIR__ . '/../includes/header_super.php';
                 <p class="text-sm text-gray-400 mt-1">لتسجيل دفعة نقدية أو تحويل لم يمرّ عبر نظام الطلبات</p>
             </div>
             <div class="p-6 space-y-4">
+
+                <!-- Payment kind: new subscription vs past payment -->
+                <div class="rounded-xl bg-blue-500/10 border border-blue-500/30 p-4">
+                    <p class="text-sm font-bold text-blue-300 mb-3">
+                        <svg class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        نوع هذه الدفعة
+                    </p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <label class="cursor-pointer">
+                            <input type="radio" name="payment_kind" value="past" checked
+                                   onchange="updateKindHint()" class="peer sr-only">
+                            <div class="px-4 py-3 rounded-xl border-2 border-white/10 bg-white/5 text-gray-300 peer-checked:border-blue-400 peer-checked:bg-blue-500/20 peer-checked:text-white transition">
+                                <div class="font-bold text-sm">📋 دفعة سابقة (تسجيل فقط)</div>
+                                <div class="text-xs opacity-70 mt-1">لا يتغيّر اشتراك المتجر</div>
+                            </div>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="payment_kind" value="new"
+                                   onchange="updateKindHint()" class="peer sr-only">
+                            <div class="px-4 py-3 rounded-xl border-2 border-white/10 bg-white/5 text-gray-300 peer-checked:border-emerald-400 peer-checked:bg-emerald-500/20 peer-checked:text-white transition">
+                                <div class="font-bold text-sm">⬆ اشتراك جديد / تجديد</div>
+                                <div class="text-xs opacity-70 mt-1">سيُرقّى المتجر للباقة المختارة تلقائياً</div>
+                            </div>
+                        </label>
+                    </div>
+                    <p id="kindHint" class="text-xs text-gray-400 mt-3 hidden"></p>
+
+                    <!-- Manual expiry: appears only when 'new subscription' is selected -->
+                    <div id="expiryWrap" class="hidden mt-4 pt-4 border-t border-blue-500/20">
+                        <label class="block text-sm font-bold text-emerald-300 mb-2">
+                            تاريخ وساعة انتهاء الاشتراك
+                            <span class="text-xs text-gray-400 font-normal">(اتركه فارغاً للحساب التلقائي حسب الباقة)</span>
+                        </label>
+                        <div class="flex flex-col sm:flex-row gap-2">
+                            <input type="datetime-local" name="subscription_expires_at" id="create-expires"
+                                   step="60" oninput="updateKindHint()"
+                                   class="flex-1 px-4 py-2.5 rounded-xl border-2 border-emerald-500/30 bg-white/5 text-white">
+                            <button type="button" onclick="document.getElementById('create-expires').value=''; updateKindHint();"
+                                    class="px-4 py-2.5 rounded-xl bg-white/10 text-gray-300 hover:bg-white/15 text-sm font-bold">مسح</button>
+                        </div>
+
+                        <!-- Quick presets -->
+                        <div class="flex flex-wrap gap-2 mt-3">
+                            <span class="text-xs text-gray-400 self-center">إعدادات سريعة:</span>
+                            <button type="button" onclick="setExpiryPreset('+1 week')"   class="px-3 py-1 rounded-lg bg-white/10 hover:bg-emerald-500/20 text-xs font-bold text-gray-200">أسبوع</button>
+                            <button type="button" onclick="setExpiryPreset('+1 month')"  class="px-3 py-1 rounded-lg bg-white/10 hover:bg-emerald-500/20 text-xs font-bold text-gray-200">شهر</button>
+                            <button type="button" onclick="setExpiryPreset('+3 months')" class="px-3 py-1 rounded-lg bg-white/10 hover:bg-emerald-500/20 text-xs font-bold text-gray-200">٣ أشهر</button>
+                            <button type="button" onclick="setExpiryPreset('+6 months')" class="px-3 py-1 rounded-lg bg-white/10 hover:bg-emerald-500/20 text-xs font-bold text-gray-200">٦ أشهر</button>
+                            <button type="button" onclick="setExpiryPreset('+1 year')"   class="px-3 py-1 rounded-lg bg-white/10 hover:bg-emerald-500/20 text-xs font-bold text-gray-200">سنة</button>
+                            <button type="button" onclick="setExpiryPreset('+2 years')"  class="px-3 py-1 rounded-lg bg-white/10 hover:bg-emerald-500/20 text-xs font-bold text-gray-200">سنتان</button>
+                        </div>
+                        <p id="expiryComputedHint" class="text-xs text-emerald-300 mt-2 hidden"></p>
+                    </div>
+                </div>
+
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
                         <label class="block text-sm font-semibold text-gray-300 mb-2">المطعم <span class="text-red-400">*</span></label>
-                        <select name="store_id" required class="w-full px-4 py-2.5 rounded-xl border-2">
+                        <select name="store_id" id="create-store" required onchange="updateAffiliateInfo()" class="w-full px-4 py-2.5 rounded-xl border-2">
                             <option value="">— اختر —</option>
                             <?php foreach ($storesList as $s): ?>
-                                <option value="<?= $s['id'] ?>" <?= $filterStoreId == $s['id'] ? 'selected' : '' ?>><?= e($s['name']) ?></option>
+                                <option value="<?= $s['id'] ?>"
+                                        data-aff-id="<?= (int) ($s['affiliate_id'] ?? 0) ?>"
+                                        data-aff-name="<?= e($s['affiliate_name'] ?? '') ?>"
+                                        data-aff-rate="<?= e($s['affiliate_store_rate'] ?? $s['affiliate_default_rate'] ?? '') ?>"
+                                        <?= $filterStoreId == $s['id'] ? 'selected' : '' ?>><?= e($s['name']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
                     <div>
-                        <label class="block text-sm font-semibold text-gray-300 mb-2">الباقة <span class="text-gray-500 font-normal">(اختياري)</span></label>
+                        <label class="block text-sm font-semibold text-gray-300 mb-2">
+                            الباقة <span id="planRequiredMark" class="text-gray-500 font-normal">(اختياري)</span>
+                        </label>
                         <select name="plan_id" id="create-plan" class="w-full px-4 py-2.5 rounded-xl border-2" onchange="suggestAmount()">
                             <option value="0">— بدون —</option>
                             <?php foreach ($plansList as $pl): ?>
-                                <option value="<?= $pl['id'] ?>" data-price="<?= (float) $pl['price'] ?>"><?= e($pl['name']) ?></option>
+                                <option value="<?= $pl['id'] ?>"
+                                        data-price="<?= (float) $pl['price'] ?>"
+                                        data-period="<?= e($pl['period'] ?? 'monthly') ?>"
+                                        data-name="<?= e($pl['name']) ?>"><?= e($pl['name']) ?> — <?= e($pl['period']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -336,13 +532,31 @@ require __DIR__ . '/../includes/header_super.php';
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
                         <label class="block text-sm font-semibold text-gray-300 mb-2">المبلغ <span class="text-red-400">*</span></label>
-                        <input type="number" step="0.01" min="0.01" name="amount" id="create-amount" required class="w-full px-4 py-2.5 rounded-xl border-2" placeholder="0.00">
+                        <input type="number" step="0.01" min="0.01" name="amount" id="create-amount" required oninput="updateCommissionPreview()" class="w-full px-4 py-2.5 rounded-xl border-2" placeholder="0.00">
                     </div>
                     <div>
                         <label class="block text-sm font-semibold text-gray-300 mb-2">تاريخ الدفع</label>
                         <input type="datetime-local" name="paid_at" step="60" class="w-full px-4 py-2.5 rounded-xl border-2">
                         <p class="text-xs text-gray-500 mt-1">اتركه فارغاً = الآن</p>
                     </div>
+                </div>
+
+                <!-- Affiliate selector + commission preview -->
+                <div class="rounded-xl bg-gradient-to-l from-orange-500/10 to-amber-500/10 border border-orange-500/30 p-4">
+                    <label class="block text-sm font-bold text-orange-300 mb-2">
+                        <svg class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857"/></svg>
+                        الوسيط المرتبط بهذه الدفعة
+                    </label>
+                    <select name="affiliate_id" id="create-affiliate" onchange="updateCommissionPreview()" class="w-full px-4 py-2.5 rounded-xl border-2 mb-3">
+                        <option value="auto" selected>تلقائي — استخدم وسيط المتجر (الافتراضي)</option>
+                        <option value="">بدون وسيط لهذه الدفعة</option>
+                        <?php foreach ($affiliatesList as $af): ?>
+                            <option value="<?= (int) $af['id'] ?>" data-rate="<?= e($af['commission_rate']) ?>" data-name="<?= e($af['name']) ?>">
+                                <?= e($af['name']) ?> (<?= e($af['referral_code']) ?>) — <?= number_format((float) $af['commission_rate'], 2) ?>%
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div id="affPreview" class="text-sm text-gray-400">اختر متجراً ومبلغاً لرؤية العمولة المُحتسبة.</div>
                 </div>
 
                 <div>
@@ -435,6 +649,155 @@ function suggestAmount() {
     const amt = document.getElementById('create-amount');
     const price = parseFloat(sel.options[sel.selectedIndex]?.dataset.price || 0);
     if (!amt.value && price > 0) amt.value = price.toFixed(2);
+    updateCommissionPreview();
+    updateKindHint();
+}
+
+// Update hint based on payment kind selection (and toggle the manual-expiry block)
+function updateKindHint() {
+    const kindNew    = document.querySelector('input[name="payment_kind"][value="new"]');
+    const planSel    = document.getElementById('create-plan');
+    const hint       = document.getElementById('kindHint');
+    const reqMark    = document.getElementById('planRequiredMark');
+    const expiryWrap = document.getElementById('expiryWrap');
+    if (!kindNew || !hint) return;
+
+    const isNew = kindNew.checked;
+
+    // Show/hide the manual-expiry section
+    if (expiryWrap) {
+        expiryWrap.classList.toggle('hidden', !isNew);
+    }
+
+    if (isNew) {
+        const opt = planSel.options[planSel.selectedIndex];
+        const planName = opt?.dataset.name || '';
+        const period   = opt?.dataset.period || '';
+        const expiryInput = document.getElementById('create-expires');
+        const manualExpiry = expiryInput?.value || '';
+
+        let durLabel;
+        if (manualExpiry) {
+            // Format manual expiry as a human-friendly date
+            const d = new Date(manualExpiry);
+            durLabel = '<span class="text-emerald-300 font-bold">حتى ' + d.toLocaleString('ar-SY', {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}) + ' (يدوي)</span>';
+        } else {
+            const periodLabels = {monthly: 'شهر واحد', yearly: 'سنة كاملة', forever: 'دائم'};
+            durLabel = '<span class="text-emerald-300 font-bold">' + (periodLabels[period] || period || '—') + '</span>';
+        }
+
+        if (!planName || planSel.value === '0' || !planSel.value) {
+            hint.innerHTML = '⚠ <span class="text-amber-300 font-bold">اختر الباقة أولاً</span> — سيُرقّى المتجر إليها وتُحسب مدة الاشتراك.';
+        } else {
+            hint.innerHTML = `✓ سيُرقّى المتجر إلى <span class="text-emerald-300 font-bold">${planName}</span> — المدة: ${durLabel}`;
+        }
+        hint.classList.remove('hidden');
+        if (reqMark) reqMark.innerHTML = '<span class="text-red-400">*</span>';
+    } else {
+        hint.classList.add('hidden');
+        if (reqMark) reqMark.innerHTML = '<span class="text-gray-500 font-normal">(اختياري)</span>';
+    }
+    updateExpiryComputedHint();
+}
+
+// Live preview under the date input — shows what got selected in plain Arabic
+function updateExpiryComputedHint() {
+    const input = document.getElementById('create-expires');
+    const hint  = document.getElementById('expiryComputedHint');
+    if (!input || !hint) return;
+    if (!input.value) {
+        hint.classList.add('hidden');
+        return;
+    }
+    const d = new Date(input.value);
+    const days = Math.ceil((d - new Date()) / (1000 * 60 * 60 * 24));
+    hint.innerHTML = '⏱ ينتهي بتاريخ: <span class="font-bold">' +
+        d.toLocaleString('ar-SY', {weekday:'long', year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit'}) +
+        '</span> (بعد ' + (days > 0 ? days + ' يوماً' : (days < 0 ? 'انتهى منذ ' + Math.abs(days) + ' يوماً' : 'اليوم')) + ')';
+    hint.classList.remove('hidden');
+}
+
+// Quick preset: e.g. setExpiryPreset('+1 month')
+function setExpiryPreset(modifier) {
+    const input = document.getElementById('create-expires');
+    if (!input) return;
+
+    // Use the payment date as the starting point, fall back to "now"
+    const paidAtField = document.querySelector('input[name="paid_at"]');
+    let baseDate;
+    if (paidAtField?.value) {
+        baseDate = new Date(paidAtField.value);
+    } else {
+        baseDate = new Date();
+    }
+
+    // Parse the modifier ("+1 month", "+3 months", "+1 year", "+1 week", ...)
+    const match = modifier.match(/^\+(\d+)\s+(week|weeks|month|months|year|years|day|days)$/i);
+    if (!match) return;
+    const n = parseInt(match[1], 10);
+    const unit = match[2].toLowerCase();
+    const target = new Date(baseDate);
+    if (unit.startsWith('week')) target.setDate(target.getDate() + 7 * n);
+    else if (unit.startsWith('day')) target.setDate(target.getDate() + n);
+    else if (unit.startsWith('month')) target.setMonth(target.getMonth() + n);
+    else if (unit.startsWith('year')) target.setFullYear(target.getFullYear() + n);
+
+    // Format as YYYY-MM-DDTHH:MM (datetime-local input format)
+    const pad = x => String(x).padStart(2, '0');
+    input.value = target.getFullYear() + '-' + pad(target.getMonth() + 1) + '-' + pad(target.getDate())
+        + 'T' + pad(target.getHours()) + ':' + pad(target.getMinutes());
+    updateKindHint();
+}
+
+// When a store is selected, refresh the commission preview
+function updateAffiliateInfo() {
+    updateCommissionPreview();
+}
+
+// Live commission preview based on store + affiliate selection + amount
+function updateCommissionPreview() {
+    const storeSel = document.getElementById('create-store');
+    const affSel   = document.getElementById('create-affiliate');
+    const amtField = document.getElementById('create-amount');
+    const preview  = document.getElementById('affPreview');
+    if (!storeSel || !affSel || !amtField || !preview) return;
+
+    const amount = parseFloat(amtField.value || 0);
+    const choice = affSel.value;
+    const storeOpt = storeSel.options[storeSel.selectedIndex];
+
+    let affName = '';
+    let rate = 0;
+    let source = '';
+
+    if (choice === '') {
+        preview.innerHTML = '<span class="text-gray-500">— لا يوجد وسيط لهذه الدفعة —</span>';
+        return;
+    }
+
+    if (choice === 'auto') {
+        const sAffId = parseInt(storeOpt?.dataset.affId || 0);
+        if (!sAffId) {
+            preview.innerHTML = '<span class="text-gray-500">— لا يوجد وسيط مرتبط بالمتجر —</span>';
+            return;
+        }
+        affName = storeOpt.dataset.affName || '';
+        rate = parseFloat(storeOpt.dataset.affRate || 0);
+        source = ' (وسيط المتجر)';
+    } else {
+        const opt = affSel.options[affSel.selectedIndex];
+        affName = opt.dataset.name || '';
+        rate = parseFloat(opt.dataset.rate || 0);
+        source = ' (مختار يدوياً)';
+    }
+
+    const commission = amount > 0 && rate > 0 ? (amount * rate / 100) : 0;
+    preview.innerHTML =
+        '<span class="font-bold text-orange-300">' + affName + '</span>' + source +
+        ' · النسبة: <span class="font-mono font-bold">' + rate.toFixed(2) + '%</span>' +
+        (amount > 0
+            ? ' · العمولة: <span class="font-mono font-bold text-amber-300">' + commission.toLocaleString(undefined, {maximumFractionDigits: 2}) + '</span>'
+            : ' · أدخل المبلغ لرؤية العمولة');
 }
 
 function openEditModal(p) {
