@@ -1,3 +1,1 @@
-# QR Stores does not run third-party advertisements.
-# This file exists to satisfy automated crawlers (Google AdSense, IAB scanners)
-# and to silence 404 noise in our error logs.
+# No third-party advertising on this site.

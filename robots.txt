@@ -1,35 +1,3 @@
-# QR Stores — robots.txt
-# https://qr-stores.com/
-
 User-agent: *
-
-# ─── Allow public-facing pages (good for SEO) ─────────────────────
 Allow: /
-Allow: /public/
-Allow: /assets/
-Allow: /demo.php
-
-# ─── Block admin / super / affiliate panels (private) ─────────────
-Disallow: /admin/
-Disallow: /super/
-Disallow: /affiliate/
-
-# ─── Block sensitive areas ────────────────────────────────────────
-Disallow: /config/
-Disallow: /includes/
-Disallow: /migrations/
-Disallow: /assets/uploads/
-Disallow: /api/
-Disallow: /*.php$
-Disallow: /*?lang=
-Disallow: /*?ref=
-
-# ─── Allow only the canonical store URLs (cleanest indexing) ──────
-Allow: /public/store.php
-Allow: /index.php
-
-# ─── Polite crawl delay (1 second between requests) ───────────────
 Crawl-delay: 1
-
-# ─── Sitemap (uncomment if/when you create one) ───────────────────
-# Sitemap: https://qr-stores.com/sitemap.xml

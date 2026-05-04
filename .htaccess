@@ -57,6 +57,18 @@ DirectoryIndex index.php login.php
     Header unset Server
 </IfModule>
 
+# --- Block search-engine indexing of admin/private areas ---
+# Sent as HTTP header instead of being listed in robots.txt — keeps the
+# directory names hidden from anyone reading robots.txt while still
+# instructing Google/Bing not to index these pages.
+<IfModule mod_rewrite.c>
+    RewriteCond %{REQUEST_URI} ^/(admin|super|affiliate|migrations|config|includes|assets/uploads)(/|$) [NC]
+    RewriteRule .* - [E=PRIVATE_AREA:1]
+</IfModule>
+<IfModule mod_headers.c>
+    Header set X-Robots-Tag "noindex, nofollow, noarchive, nosnippet" env=PRIVATE_AREA
+</IfModule>
+
 # --- Block direct access to dotfiles and sensitive files ---
 <FilesMatch "^\.">
     Require all denied
