@@ -8,6 +8,7 @@ if (!$r) {
     unset($_SESSION['store_id']);
     redirect(BASE_URL . '/admin/login.php');
 }
+requireActivePlan($r);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
     $action = $_POST['action'] ?? '';

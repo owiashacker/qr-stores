@@ -6,6 +6,7 @@ $rid = $_SESSION['store_id'];
 // AND GET (thumbnail resolution at line ~249 + rendering the MAX gallery + pricing) —
 // load it once up top so "Undefined variable $r" doesn't fire on plain page loads.
 $r = currentStore($pdo);
+requireActivePlan($r);
 // Sector-aware labels: "الأصناف" (restaurant) / "المنتجات" (clothing) / "الموديلات" (cars) / etc.
 $pageTitle = bizLabel($r, 'plural');
 $labelItem = bizLabel($r, 'singular');       // e.g. "صنف" / "منتج" / "موديل"

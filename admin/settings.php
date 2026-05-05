@@ -5,6 +5,7 @@ requireLogin();
 
 $rid = $_SESSION['store_id'];
 $r = currentStore($pdo);
+requireActivePlan($r);
 
 // Sector-aware labels (safe even if store/biz type missing — bizLabel falls back).
 // bizNameDefinite returns the biz-type name with proper Arabic "ال" prefix

@@ -179,22 +179,33 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
                 $expAgo = $r['expired_at_raw'] ? (int) floor((time() - strtotime($r['expired_at_raw'])) / 86400) : 0;
                 $isFreeTrialEnded = ($r['original_plan_code'] ?? '') === 'free';
             ?>
-                <div class="mb-6 p-4 md:p-5 rounded-2xl bg-gradient-to-r from-red-50 via-rose-50 to-red-50 border-2 border-red-200">
-                    <div class="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
+                <div class="mb-6 p-4 md:p-5 rounded-2xl bg-gradient-to-r from-red-50 via-rose-50 to-red-50 border-2 border-red-300 shadow-md">
+                    <div class="flex flex-col md:flex-row md:items-start gap-3 md:gap-4">
                         <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center text-white flex-shrink-0 shadow-lg">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
                         </div>
                         <div class="flex-1">
                             <?php if ($isFreeTrialEnded): ?>
-                                <h3 class="font-black text-red-900 mb-1">انتهت الفترة التجريبية المجانية<?= $expAgo > 0 ? ' منذ ' . $expAgo . ' يوم' : '' ?></h3>
-                                <p class="text-sm text-red-800">انتهت 7 أيامك التجريبية. ترقّ إلى باقة احترافي أو ماكس لمتابعة استخدام المنصة بكل ميزاتها.</p>
+                                <h3 class="font-black text-red-900 text-base md:text-lg mb-2">⏱ انتهت الفترة التجريبية المجانية<?= $expAgo > 0 ? ' منذ ' . $expAgo . ' يوم' : '' ?></h3>
                             <?php else: ?>
-                                <h3 class="font-black text-red-900 mb-1">باقة <?= e($r['original_plan_name']) ?> انتهت<?= $expAgo > 0 ? ' منذ ' . $expAgo . ' يوم' : '' ?></h3>
-                                <p class="text-sm text-red-800">تم تقييد حسابك مؤقتاً بميزات الباقة المجانية. أصنافك الإضافية وصورك وإعداداتك محفوظة — جدّد الاشتراك لاستعادة كل شيء فوراً.</p>
+                                <h3 class="font-black text-red-900 text-base md:text-lg mb-2">⏱ انتهت باقة <?= e($r['original_plan_name']) ?><?= $expAgo > 0 ? ' منذ ' . $expAgo . ' يوم' : '' ?></h3>
                             <?php endif; ?>
+
+                            <!-- Two-card layout: what works / what's blocked -->
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+                                <div class="rounded-lg bg-white/70 p-3 border border-emerald-200">
+                                    <p class="text-xs font-black text-emerald-700 mb-1">✓ متجرك يعمل للزبائن</p>
+                                    <p class="text-xs text-emerald-900/80 leading-relaxed">رابط متجرك ومنتجاتك ما زالت ظاهرة للعملاء كالمعتاد.</p>
+                                </div>
+                                <div class="rounded-lg bg-white/70 p-3 border border-red-200">
+                                    <p class="text-xs font-black text-red-700 mb-1">✕ التعديل موقوف مؤقّتاً</p>
+                                    <p class="text-xs text-red-900/80 leading-relaxed">لا يمكنك إضافة أو تعديل أي شيء حتى تجدّد الباقة.</p>
+                                </div>
+                            </div>
+                            <p class="text-xs text-red-800 font-semibold">جدّد الباقة الآن لاستعادة التحكم الكامل بمتجرك.</p>
                         </div>
-                        <a href="<?= BASE_URL ?>/admin/upgrade.php" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 text-white font-bold shadow-lg hover:shadow-xl transition whitespace-nowrap">
-                            <?= $isFreeTrialEnded ? 'ترقية الباقة' : 'جدّد الاشتراك' ?>
+                        <a href="<?= BASE_URL ?>/admin/upgrade.php" class="px-5 py-3 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 text-white font-bold shadow-lg hover:shadow-xl transition whitespace-nowrap text-center md:self-center">
+                            ترقية الباقة الآن ←
                         </a>
                     </div>
                 </div>

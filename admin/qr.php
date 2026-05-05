@@ -5,6 +5,7 @@ $pageTitle = 'QR Code';
 
 $rid = $_SESSION['store_id'];
 $r = currentStore($pdo);
+requireActivePlan($r);
 
 // 5 modern QR styles — each maps to qr-code-styling library config
 $QR_STYLES = [

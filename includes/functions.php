@@ -103,6 +103,29 @@ function requireLogin()
     }
 }
 
+/**
+ * Block all WRITE operations when the store's subscription is expired.
+ * The store remains visible to customers (public/store.php), but the
+ * owner cannot create / edit / delete anything until they renew.
+ *
+ * Usage (at the top of every page that handles POST):
+ *   requireLogin();
+ *   $r = currentStore($pdo);
+ *   requireActivePlan($r);
+ *
+ * For pages that ONLY display data (GET-only), this is unnecessary
+ * — the expiry banner in header_admin.php already explains the state.
+ */
+function requireActivePlan($r): void
+{
+    if (empty($r['is_expired'])) return;
+    // For POST requests, block immediately and bounce to upgrade
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+        flash('error', 'انتهت فترتك التجريبية. متجرك يعمل للزبائن لكن لا يمكنك التعديل حتى تُجدّد الباقة.');
+        redirect(BASE_URL . '/admin/upgrade.php');
+    }
+}
+
 function currentStore($pdo)
 {
     if (empty($_SESSION['store_id'])) return null;

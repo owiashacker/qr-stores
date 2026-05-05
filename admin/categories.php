@@ -5,6 +5,7 @@ $rid = $_SESSION['store_id'];
 // $r needed both inside POST (limit check on create) and GET (render footer badges
 // with $r['max_categories']). Load once at the top so it's always defined.
 $r = currentStore($pdo);
+requireActivePlan($r);
 // Sector-aware labels (e.g. "الأقسام" for restaurants vs "الفئات" for clothing).
 $pageTitle = bizLabel($r, 'categories');
 $labelCat = bizLabel($r, 'category');        // singular e.g. "القسم"
