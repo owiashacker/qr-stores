@@ -20,6 +20,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
             $customExpiry = trim($_POST['custom_expiry'] ?? '');
             if ($customExpiry) {
                 $expires = date('Y-m-d H:i:s', strtotime($customExpiry));
+            } elseif ($plan && $plan['period'] === '7days') {
+                $expires = date('Y-m-d H:i:s', strtotime('+7 days'));
             } elseif ($plan && $plan['period'] === 'monthly') {
                 $expires = date('Y-m-d H:i:s', strtotime('+30 days'));
             } elseif ($plan && $plan['period'] === 'yearly') {
@@ -144,7 +146,12 @@ require __DIR__ . '/../includes/header_super.php';
                     </div>
                     <div class="p-3 rounded-xl bg-white/5">
                         <p class="text-xs text-gray-500 mb-1">السعر</p>
-                        <p class="font-bold text-emerald-400">$<?= (int) $req['price'] ?>/<?= $req['period'] === 'monthly' ? 'شهر' : ($req['period'] === 'yearly' ? 'سنة' : 'دائم') ?></p>
+                        <p class="font-bold text-emerald-400">$<?= (int) $req['price'] ?>/<?= match ($req['period']) {
+                            '7days'   => '7 أيام',
+                            'monthly' => 'شهر',
+                            'yearly'  => 'سنة',
+                            default   => 'دائم',
+                        } ?></p>
                     </div>
                     <div class="p-3 rounded-xl bg-white/5">
                         <p class="text-xs text-gray-500 mb-1">الدفع</p>
@@ -221,7 +228,7 @@ require __DIR__ . '/../includes/header_super.php';
                         <button type="button" onclick="setAppExpiry(365)" class="px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-bold text-gray-300">+سنة</button>
                         <button type="button" onclick="document.getElementById('app-expiry').value=''" class="px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-bold text-amber-300">استخدم الافتراضي</button>
                     </div>
-                    <p class="text-xs text-gray-500 mt-2">اتركه فارغاً لاستخدام المدة الافتراضية للباقة (30 للشهري، 365 للسنوي، لا شيء للدائم)</p>
+                    <p class="text-xs text-gray-500 mt-2">اتركه فارغاً لاستخدام المدة الافتراضية للباقة (7 للتجريبي، 30 للشهري، 365 للسنوي، لا شيء للدائم)</p>
                 </div>
 
                 <div class="p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20 space-y-4">

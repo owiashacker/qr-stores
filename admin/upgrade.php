@@ -137,7 +137,12 @@ require __DIR__ . '/../includes/header_admin.php';
                         <?php
                         // Prices are hidden on the public pricing cards by design:
                         // stores contact support on WhatsApp to get a quote/offer.
-                        $periodLabel = $plan['period'] === 'monthly' ? 'شهرياً' : ($plan['period'] === 'yearly' ? 'سنوياً' : 'دائماً');
+                        $periodLabel = match ($plan['period']) {
+                            '7days'   => 'لمدة 7 أيام',
+                            'monthly' => 'شهرياً',
+                            'yearly'  => 'سنوياً',
+                            default   => 'دائماً',
+                        };
                         $waDigits = $siteWhatsapp ? preg_replace('/\D/', '', $siteWhatsapp) : '';
                         $waMsg = 'مرحباً، أريد الاستفسار عن سعر باقة ' . $plan['name'];
                         $waHref = $waDigits ? 'https://wa.me/' . $waDigits . '?text=' . rawurlencode($waMsg) : null;

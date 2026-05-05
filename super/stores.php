@@ -9,11 +9,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
     $id = (int) ($_POST['id'] ?? 0);
 
     if ($action === 'approve' && $id) {
+        // Compute expiry based on the store's current plan period (7days/monthly/yearly).
+        // This means a freshly-approved store on the free plan gets a 7-day trial window.
+        $expiry = null;
+        $stmt = $pdo->prepare('SELECT p.period FROM stores s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.id = ?');
+        $stmt->execute([$id]);
+        $period = $stmt->fetchColumn();
+        if ($period === '7days') {
+            $expiry = date('Y-m-d H:i:s', strtotime('+7 days'));
+        } elseif ($period === 'monthly') {
+            $expiry = date('Y-m-d H:i:s', strtotime('+1 month'));
+        } elseif ($period === 'yearly') {
+            $expiry = date('Y-m-d H:i:s', strtotime('+1 year'));
+        }
+        // 'forever' or unknown → leave NULL (permanent)
+
         $pdo->prepare(
-            'UPDATE stores SET approval_status = ?, approved_at = NOW(), approved_by = ?, is_active = 1, rejection_reason = NULL WHERE id = ?'
-        )->execute(['approved', $_SESSION['admin_id'], $id]);
-        log_activity_event('store_approved', ['store_id' => $id]);
-        flash('success', 'تم تفعيل المتجر');
+            'UPDATE stores SET approval_status = ?, approved_at = NOW(), approved_by = ?, is_active = 1,
+                rejection_reason = NULL,
+                subscription_expires_at = COALESCE(subscription_expires_at, ?),
+                subscription_status = ?
+             WHERE id = ?'
+        )->execute(['approved', $_SESSION['admin_id'], $expiry, 'active', $id]);
+        log_activity_event('store_approved', ['store_id' => $id, 'period' => $period, 'expiry' => $expiry]);
+        $msg = 'تم تفعيل المتجر';
+        if ($expiry) {
+            $msg .= ' — صالح حتى ' . date('Y-m-d', strtotime($expiry));
+        }
+        flash('success', $msg);
     } elseif ($action === 'reject' && $id) {
         $reason = trim($_POST['rejection_reason'] ?? '');
         $pdo->prepare(

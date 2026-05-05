@@ -69,7 +69,7 @@ require __DIR__ . '/../includes/header_super.php';
             <div>
                 <label class="block text-sm font-semibold text-gray-300 mb-2">الفترة</label>
                 <select name="period" class="w-full px-4 py-3 rounded-xl border-2">
-                    <?php foreach (['monthly' => 'شهري', 'yearly' => 'سنوي', 'forever' => 'دائم'] as $v => $l): ?>
+                    <?php foreach (['7days' => '7 أيام (تجريبي)', 'monthly' => 'شهري', 'yearly' => 'سنوي', 'forever' => 'دائم'] as $v => $l): ?>
                         <option value="<?= $v ?>" <?= $editPlan['period'] == $v ? 'selected' : '' ?>><?= $l ?></option>
                     <?php endforeach; ?>
                 </select>
@@ -161,7 +161,12 @@ require __DIR__ . '/../includes/header_super.php';
             <?php endif; ?>
         </div>
         <div class="mb-4 pb-4 border-b border-white/5">
-            <p class="text-3xl font-black text-white">$<?= (int) $plan['price'] ?><span class="text-sm text-gray-500">/<?= $plan['period'] === 'monthly' ? 'شهرياً' : ($plan['period'] === 'yearly' ? 'سنوياً' : 'دائم') ?></span></p>
+            <p class="text-3xl font-black text-white">$<?= (int) $plan['price'] ?><span class="text-sm text-gray-500">/<?= match ($plan['period']) {
+                '7days'   => '7 أيام',
+                'monthly' => 'شهرياً',
+                'yearly'  => 'سنوياً',
+                default   => 'دائم',
+            } ?></span></p>
             <p class="text-xs text-gray-500 mt-1"><?= e($plan['tagline']) ?></p>
         </div>
         <div class="space-y-2 text-sm mb-4">

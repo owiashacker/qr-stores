@@ -177,6 +177,7 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
         <div class="p-4 md:p-8">
             <?php if (!empty($r['is_expired'])):
                 $expAgo = $r['expired_at_raw'] ? (int) floor((time() - strtotime($r['expired_at_raw'])) / 86400) : 0;
+                $isFreeTrialEnded = ($r['original_plan_code'] ?? '') === 'free';
             ?>
                 <div class="mb-6 p-4 md:p-5 rounded-2xl bg-gradient-to-r from-red-50 via-rose-50 to-red-50 border-2 border-red-200">
                     <div class="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
@@ -184,11 +185,16 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
                         </div>
                         <div class="flex-1">
-                            <h3 class="font-black text-red-900 mb-1">باقة <?= e($r['original_plan_name']) ?> انتهت<?= $expAgo > 0 ? ' منذ ' . $expAgo . ' يوم' : '' ?></h3>
-                            <p class="text-sm text-red-800">تم تقييد حسابك مؤقتاً بميزات الباقة المجانية. أصنافك الإضافية وصورك وإعداداتك محفوظة — جدّد الاشتراك لاستعادة كل شيء فوراً.</p>
+                            <?php if ($isFreeTrialEnded): ?>
+                                <h3 class="font-black text-red-900 mb-1">انتهت الفترة التجريبية المجانية<?= $expAgo > 0 ? ' منذ ' . $expAgo . ' يوم' : '' ?></h3>
+                                <p class="text-sm text-red-800">انتهت 7 أيامك التجريبية. ترقّ إلى باقة احترافي أو ماكس لمتابعة استخدام المنصة بكل ميزاتها.</p>
+                            <?php else: ?>
+                                <h3 class="font-black text-red-900 mb-1">باقة <?= e($r['original_plan_name']) ?> انتهت<?= $expAgo > 0 ? ' منذ ' . $expAgo . ' يوم' : '' ?></h3>
+                                <p class="text-sm text-red-800">تم تقييد حسابك مؤقتاً بميزات الباقة المجانية. أصنافك الإضافية وصورك وإعداداتك محفوظة — جدّد الاشتراك لاستعادة كل شيء فوراً.</p>
+                            <?php endif; ?>
                         </div>
                         <a href="<?= BASE_URL ?>/admin/upgrade.php" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 text-white font-bold shadow-lg hover:shadow-xl transition whitespace-nowrap">
-                            جدّد الاشتراك
+                            <?= $isFreeTrialEnded ? 'ترقية الباقة' : 'جدّد الاشتراك' ?>
                         </a>
                     </div>
                 </div>

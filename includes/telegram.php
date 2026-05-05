@@ -25,6 +25,17 @@
  */
 function tgSend(PDO $pdo, string $message, string $eventKey = ''): bool
 {
+    // Safety: never send when running tests / CLI / from localhost
+    // (prevents accidental notifications from local dev or automated tests)
+    $isLocalHost = isset($_SERVER['HTTP_HOST']) && in_array(
+        explode(':', $_SERVER['HTTP_HOST'])[0],
+        ['localhost', '127.0.0.1', '::1'],
+        true
+    );
+    if (PHP_SAPI === 'cli' || $isLocalHost) {
+        return false;
+    }
+
     $token   = trim((string) siteSetting($pdo, 'telegram_bot_token', ''));
     $chatId  = trim((string) siteSetting($pdo, 'telegram_chat_id', ''));
     $enabled = siteSetting($pdo, 'telegram_enabled', '1') === '1';

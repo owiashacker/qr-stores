@@ -96,7 +96,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
                     }
 
                     $period = $planRow['period'] ?? 'monthly';
-                    if ($period === 'monthly') {
+                    if ($period === '7days') {
+                        $newExpiry = date('Y-m-d H:i:s', strtotime('+7 days', $startTs));
+                    } elseif ($period === 'monthly') {
                         $newExpiry = date('Y-m-d H:i:s', strtotime('+1 month', $startTs));
                     } elseif ($period === 'yearly') {
                         $newExpiry = date('Y-m-d H:i:s', strtotime('+1 year', $startTs));
@@ -327,7 +329,7 @@ require __DIR__ . '/../includes/header_super.php';
                     <?php foreach ($payments as $p):
                         $mIcon  = $methodIcons[$p['payment_method']]  ?? '';
                         $mLabel = $methodLabels[$p['payment_method']] ?? ($p['payment_method'] ?: '—');
-                        $periodLabel = ['monthly' => 'شهري', 'yearly' => 'سنوي', 'lifetime' => 'دائم'][$p['period']] ?? '';
+                        $periodLabel = ['7days' => '7 أيام (تجريبي)', 'monthly' => 'شهري', 'yearly' => 'سنوي', 'forever' => 'دائم', 'lifetime' => 'دائم'][$p['period']] ?? '';
                     ?>
                         <tr class="border-t border-white/5 hover:bg-white/5">
                             <td class="py-3 px-4 whitespace-nowrap text-gray-300"><?= date('Y-m-d H:i', strtotime($p['paid_at'])) ?></td>
@@ -682,7 +684,7 @@ function updateKindHint() {
             const d = new Date(manualExpiry);
             durLabel = '<span class="text-emerald-300 font-bold">حتى ' + d.toLocaleString('ar-SY', {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}) + ' (يدوي)</span>';
         } else {
-            const periodLabels = {monthly: 'شهر واحد', yearly: 'سنة كاملة', forever: 'دائم'};
+            const periodLabels = {'7days': '7 أيام', monthly: 'شهر واحد', yearly: 'سنة كاملة', forever: 'دائم'};
             durLabel = '<span class="text-emerald-300 font-bold">' + (periodLabels[period] || period || '—') + '</span>';
         }
 
