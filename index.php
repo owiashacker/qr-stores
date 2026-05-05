@@ -410,12 +410,8 @@ $contactWhatsapp = preg_replace('/\D/', '', siteSetting($pdo, 'contact_whatsapp'
                     $isPopular = (int) $plan['is_popular'] === 1;
                     $isPremium = $plan['code'] === 'max';
                     $isFree = $plan['code'] === 'free';
-                    $periodLabel = match ($plan['period']) {
-                        '7days'   => 'لمدة 7 أيام',
-                        'monthly' => 'شهرياً',
-                        'yearly'  => 'سنوياً',
-                        default   => 'دائماً',
-                    };
+                    $periodLabels = ['7days' => 'لمدة 7 أيام', 'monthly' => 'شهرياً', 'yearly' => 'سنوياً'];
+                    $periodLabel  = $periodLabels[$plan['period']] ?? 'دائماً';
 
                     if ($isPremium) {
                         $cardClass = 'relative bg-gradient-to-br from-gray-900 via-gray-900 to-amber-900 text-white';

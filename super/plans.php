@@ -161,12 +161,8 @@ require __DIR__ . '/../includes/header_super.php';
             <?php endif; ?>
         </div>
         <div class="mb-4 pb-4 border-b border-white/5">
-            <p class="text-3xl font-black text-white">$<?= (int) $plan['price'] ?><span class="text-sm text-gray-500">/<?= match ($plan['period']) {
-                '7days'   => '7 أيام',
-                'monthly' => 'شهرياً',
-                'yearly'  => 'سنوياً',
-                default   => 'دائم',
-            } ?></span></p>
+            <?php $planPeriodMap = ['7days' => '7 أيام', 'monthly' => 'شهرياً', 'yearly' => 'سنوياً']; ?>
+            <p class="text-3xl font-black text-white">$<?= (int) $plan['price'] ?><span class="text-sm text-gray-500">/<?= $planPeriodMap[$plan['period']] ?? 'دائم' ?></span></p>
             <p class="text-xs text-gray-500 mt-1"><?= e($plan['tagline']) ?></p>
         </div>
         <div class="space-y-2 text-sm mb-4">

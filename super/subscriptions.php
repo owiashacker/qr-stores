@@ -146,12 +146,8 @@ require __DIR__ . '/../includes/header_super.php';
                     </div>
                     <div class="p-3 rounded-xl bg-white/5">
                         <p class="text-xs text-gray-500 mb-1">السعر</p>
-                        <p class="font-bold text-emerald-400">$<?= (int) $req['price'] ?>/<?= match ($req['period']) {
-                            '7days'   => '7 أيام',
-                            'monthly' => 'شهر',
-                            'yearly'  => 'سنة',
-                            default   => 'دائم',
-                        } ?></p>
+                        <?php $reqPeriodMap = ['7days' => '7 أيام', 'monthly' => 'شهر', 'yearly' => 'سنة']; ?>
+                        <p class="font-bold text-emerald-400">$<?= (int) $req['price'] ?>/<?= $reqPeriodMap[$req['period']] ?? 'دائم' ?></p>
                     </div>
                     <div class="p-3 rounded-xl bg-white/5">
                         <p class="text-xs text-gray-500 mb-1">الدفع</p>
