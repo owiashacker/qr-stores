@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
+require_once __DIR__ . '/../includes/countries.php';
 requireAdminLogin();
 $pageTitle = 'إدارة المطاعم';
 
@@ -7,7 +8,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
     $action = $_POST['action'] ?? '';
     $id = (int) ($_POST['id'] ?? 0);
 
-    if ($action === 'toggle_active' && $id) {
+    if ($action === 'approve' && $id) {
+        $pdo->prepare(
+            'UPDATE stores SET approval_status = ?, approved_at = NOW(), approved_by = ?, is_active = 1, rejection_reason = NULL WHERE id = ?'
+        )->execute(['approved', $_SESSION['admin_id'], $id]);
+        log_activity_event('store_approved', ['store_id' => $id]);
+        flash('success', 'تم تفعيل المتجر');
+    } elseif ($action === 'reject' && $id) {
+        $reason = trim($_POST['rejection_reason'] ?? '');
+        $pdo->prepare(
+            'UPDATE stores SET approval_status = ?, approved_at = NOW(), approved_by = ?, is_active = 0, rejection_reason = ? WHERE id = ?'
+        )->execute(['rejected', $_SESSION['admin_id'], $reason !== '' ? $reason : null, $id]);
+        log_activity_event('store_rejected', ['store_id' => $id, 'reason' => $reason]);
+        flash('success', 'تم رفض طلب المتجر');
+    } elseif ($action === 'toggle_active' && $id) {
         $pdo->prepare('UPDATE stores SET is_active = 1 - is_active WHERE id = ?')->execute([$id]);
         flash('success', 'تم تحديث حالة المطعم');
     } elseif ($action === 'change_plan' && $id) {
@@ -107,8 +121,139 @@ unset($rest);
 
 $plans = $pdo->query('SELECT * FROM plans ORDER BY sort_order')->fetchAll();
 
+// Pending approval requests — shown at the top of the page, separately from
+// the regular store list, so the super-admin notices them immediately.
+$pendingStores = $pdo->query("
+    SELECT s.id, s.name, s.email, s.phone, s.whatsapp, s.country, s.created_at,
+           bt.name_ar AS biz_name, bt.icon AS biz_icon,
+           a.name AS affiliate_name, a.referral_code AS affiliate_code
+    FROM stores s
+    LEFT JOIN business_types bt ON bt.id = s.business_type_id
+    LEFT JOIN affiliates a ON a.id = s.affiliate_id
+    WHERE s.approval_status = 'pending'
+    ORDER BY s.created_at ASC
+")->fetchAll();
+
 require __DIR__ . '/../includes/header_super.php';
 ?>
+
+<!-- ═══ PENDING APPROVAL REQUESTS (shown only when there are any) ═══ -->
+<?php if ($pendingStores): ?>
+<div class="mb-6 rounded-2xl bg-gradient-to-l from-amber-500/15 to-orange-500/15 border-2 border-amber-500/40 p-5">
+    <div class="flex items-center gap-3 mb-4">
+        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/30 flex-shrink-0">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+            </svg>
+        </div>
+        <div class="flex-1">
+            <h2 class="text-lg md:text-xl font-black text-white">
+                طلبات بانتظار الموافقة
+                <span class="inline-block px-2 py-0.5 rounded-full bg-amber-500 text-white text-sm font-bold mr-2"><?= count($pendingStores) ?></span>
+            </h2>
+            <p class="text-sm text-amber-200/80">راجع الطلبات الجديدة وتواصل مع أصحاب المتاجر عبر الواتساب قبل الموافقة</p>
+        </div>
+    </div>
+
+    <div class="space-y-3">
+        <?php foreach ($pendingStores as $ps): ?>
+        <div class="bg-white/5 backdrop-blur rounded-xl p-4 border border-white/10">
+            <div class="flex flex-col lg:flex-row gap-4 items-start">
+                <div class="flex items-center gap-3 flex-1 min-w-0">
+                    <div class="w-12 h-12 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white font-black text-lg flex-shrink-0">
+                        <?= e(mb_substr($ps['name'], 0, 1)) ?>
+                    </div>
+                    <div class="min-w-0">
+                        <p class="font-black text-white truncate"><?= e($ps['name']) ?></p>
+                        <p class="text-xs text-gray-400">
+                            <?= e($ps['biz_icon'] ?? '') ?>
+                            <?= e($ps['biz_name'] ?? '—') ?>
+                            <?php if ($ps['country']): ?>
+                                · 🌍 <span class="text-amber-300 font-bold"><?= e(countryName($ps['country'])) ?></span>
+                            <?php endif; ?>
+                            · سُجِّل
+                            <?= date('Y-m-d H:i', strtotime($ps['created_at'])) ?>
+                        </p>
+                    </div>
+                </div>
+
+                <div class="flex flex-col sm:flex-row gap-2 text-xs flex-1 min-w-0">
+                    <span class="px-3 py-1 rounded-lg bg-white/5 text-gray-300 truncate" dir="ltr" title="<?= e($ps['email']) ?>">
+                        ✉ <?= e($ps['email']) ?>
+                    </span>
+                    <a href="https://wa.me/<?= e(preg_replace('/\D/', '', $ps['whatsapp'])) ?>" target="_blank"
+                       class="px-3 py-1 rounded-lg bg-green-500/20 text-green-300 hover:bg-green-500/30 font-bold transition flex items-center gap-1.5 whitespace-nowrap" dir="ltr">
+                        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51a12.8 12.8 0 00-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></svg>
+                        <?= e($ps['whatsapp']) ?>
+                    </a>
+                    <?php if ($ps['affiliate_name']): ?>
+                        <span class="px-3 py-1 rounded-lg bg-orange-500/20 text-orange-300 whitespace-nowrap">
+                            وسيط: <?= e($ps['affiliate_name']) ?>
+                        </span>
+                    <?php endif; ?>
+                </div>
+
+                <div class="flex gap-2 flex-shrink-0">
+                    <form method="POST" class="inline" onsubmit="return confirm('تفعيل هذا المتجر؟ سيتمكّن صاحبه من الدخول فوراً.')">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="approve">
+                        <input type="hidden" name="id" value="<?= (int) $ps['id'] ?>">
+                        <button type="submit" class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-sm shadow flex items-center gap-1.5 active:scale-95 transition">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                            موافقة
+                        </button>
+                    </form>
+                    <button type="button" onclick='openRejectModal(<?= (int) $ps['id'] ?>, <?= json_encode($ps['name'], JSON_UNESCAPED_UNICODE | JSON_HEX_APOS) ?>)'
+                            class="px-4 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 font-bold text-sm flex items-center gap-1.5 active:scale-95 transition">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+                        رفض
+                    </button>
+                </div>
+            </div>
+        </div>
+        <?php endforeach; ?>
+    </div>
+</div>
+
+<!-- Reject modal -->
+<div id="rejectModal" class="fixed inset-0 bg-black/70 z-50 hidden items-center justify-center p-4" onclick="if(event.target===this)closeRejectModal()">
+    <div class="bg-gray-900 border border-white/10 rounded-2xl p-6 max-w-md w-full">
+        <h3 class="text-lg font-black text-white mb-1">رفض طلب المتجر</h3>
+        <p class="text-sm text-gray-400 mb-4">المتجر: <span id="rejectStoreName" class="text-red-400 font-bold"></span></p>
+
+        <form method="POST" class="space-y-4">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="reject">
+            <input type="hidden" name="id" id="rejectStoreId" value="">
+            <div>
+                <label class="block text-sm font-bold text-gray-300 mb-2">سبب الرفض (سيُعرض لصاحب المتجر عند محاولة الدخول)</label>
+                <textarea name="rejection_reason" rows="3" maxlength="500"
+                          class="w-full px-4 py-2.5 rounded-xl bg-white/5 border-2 border-white/10 text-white"
+                          placeholder="مثال: البيانات غير مكتملة — يرجى إعادة التسجيل بمعلومات صحيحة."></textarea>
+            </div>
+            <div class="flex items-center justify-end gap-2 pt-3 border-t border-white/10">
+                <button type="button" onclick="closeRejectModal()" class="px-4 py-2 rounded-xl text-gray-400 hover:text-white">إلغاء</button>
+                <button type="submit" class="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold">تأكيد الرفض</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openRejectModal(id, name) {
+    const m = document.getElementById('rejectModal');
+    document.getElementById('rejectStoreId').value = id;
+    document.getElementById('rejectStoreName').textContent = name;
+    m.classList.remove('hidden');
+    m.classList.add('flex');
+}
+function closeRejectModal() {
+    const m = document.getElementById('rejectModal');
+    m.classList.add('hidden');
+    m.classList.remove('flex');
+}
+</script>
+<?php endif; ?>
 
 <!-- Filters -->
 <div class="card rounded-2xl p-4 mb-6">

@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
+require_once __DIR__ . '/../includes/telegram.php';
 requireLogin();
 $pageTitle = 'الباقات والترقية';
 $rid = $_SESSION['store_id'];
@@ -23,6 +24,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
             $stmt = $pdo->prepare('INSERT INTO subscription_requests (store_id, plan_id, payment_method, notes) VALUES (?, ?, ?, ?)');
             $stmt->execute([$rid, $planId, $paymentMethod, $notes]);
             flash('success', 'تم إرسال طلب الترقية إلى باقة ' . $plan['name'] . '. سنتواصل معك خلال 24 ساعة.');
+
+            // Telegram notification (silent, never blocks the response)
+            $storeRow = $pdo->prepare('SELECT s.name AS store_name, p.name AS current_plan FROM stores s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.id = ?');
+            $storeRow->execute([$rid]);
+            $sr = $storeRow->fetch();
+            tgNotifyEvent($pdo, 'plan_upgrade', [
+                'store_id'        => $rid,
+                'store_name'      => $sr['store_name'] ?? '—',
+                'current_plan'    => $sr['current_plan'] ?? '—',
+                'requested_plan'  => $plan['name'],
+                'note'            => $notes,
+            ]);
         }
         redirect(BASE_URL . '/admin/upgrade.php');
     }

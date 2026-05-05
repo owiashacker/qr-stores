@@ -24,17 +24,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             security_log($pdo, 'rate_limited', 'warning', ['email' => $email], 'store');
             $error = 'محاولات دخول كثيرة. حاول بعد 15 دقيقة.';
         } else {
-            $stmt = $pdo->prepare('SELECT * FROM stores WHERE email = ? AND is_active = 1 LIMIT 1');
+            // Look up by email regardless of status — we need to distinguish
+            // wrong-password vs pending-approval vs rejected.
+            $stmt = $pdo->prepare('SELECT * FROM stores WHERE email = ? LIMIT 1');
             $stmt->execute([$email]);
             $rUser = $stmt->fetch();
 
             if ($rUser && verify_password($password, $rUser['password'])) {
-                record_login_attempt($pdo, $email, true, 'store');
-                clear_login_attempts($pdo, $email);
-                regenerate_session_id();
-                $_SESSION['store_id'] = (int) $rUser['id'];
-                security_log($pdo, 'login_success', 'info', null, 'store', (int) $rUser['id']);
-                redirect(BASE_URL . '/admin/dashboard.php');
+                // Password is correct — now check approval status
+                $approval = $rUser['approval_status'] ?? 'approved'; // legacy stores default to approved
+
+                if ($approval === 'pending') {
+                    security_log($pdo, 'login_blocked_pending', 'info', ['email' => $email], 'store', (int) $rUser['id']);
+                    // Show the friendly waiting page with their info
+                    $_SESSION['pending_store_email']    = $rUser['email'];
+                    $_SESSION['pending_store_whatsapp'] = $rUser['whatsapp'];
+                    redirect(BASE_URL . '/admin/pending.php');
+                }
+
+                if ($approval === 'rejected') {
+                    security_log($pdo, 'login_blocked_rejected', 'warning', ['email' => $email], 'store', (int) $rUser['id']);
+                    $reason = trim((string) ($rUser['rejection_reason'] ?? ''));
+                    $error = '✕ تم رفض طلب تفعيل متجرك.';
+                    if ($reason !== '') {
+                        $error .= ' السبب: ' . $reason;
+                    } else {
+                        $error .= ' للاستفسار، تواصل مع إدارة المنصة.';
+                    }
+                } elseif (!$rUser['is_active']) {
+                    // Approved but manually deactivated by super-admin
+                    security_log($pdo, 'login_blocked_inactive', 'warning', ['email' => $email], 'store', (int) $rUser['id']);
+                    $error = 'تم إيقاف هذا الحساب مؤقتاً. تواصل مع إدارة المنصة.';
+                } else {
+                    // All clear — log them in
+                    record_login_attempt($pdo, $email, true, 'store');
+                    clear_login_attempts($pdo, $email);
+                    regenerate_session_id();
+                    $_SESSION['store_id'] = (int) $rUser['id'];
+                    security_log($pdo, 'login_success', 'info', null, 'store', (int) $rUser['id']);
+                    redirect(BASE_URL . '/admin/dashboard.php');
+                }
             } else {
                 record_login_attempt($pdo, $email, false, 'store');
                 security_log($pdo, 'login_failed', 'warning', ['email' => $email], 'store');

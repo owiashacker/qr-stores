@@ -1,5 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
+require_once __DIR__ . '/../includes/countries.php';
+require_once __DIR__ . '/../includes/telegram.php';
 
 if (!empty($_SESSION['store_id'])) {
     redirect(BASE_URL . '/admin/dashboard.php');
@@ -63,6 +65,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = clean_email($_POST['email'] ?? '');
         $password = (string) ($_POST['password'] ?? '');
         $phone = clean_phone($_POST['phone'] ?? '');
+        $whatsapp = clean_phone($_POST['whatsapp'] ?? '');
+        $country = strtoupper(trim($_POST['country'] ?? ''));
 
         // Verify the selected business_type is real + active (trust nothing from client)
         $validTypeIds = array_map(fn($t) => (int) $t['id'], $businessTypes);
@@ -72,6 +76,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (mb_strlen($name) < 2) $errors[] = 'اسم المتجر قصير جداً';
         if (!$email) $errors[] = 'البريد الإلكتروني غير صالح';
+        // WhatsApp is now mandatory — used by super-admin to contact the owner during approval
+        if (mb_strlen($whatsapp) < 7) $errors[] = 'رقم الواتساب مطلوب للتواصل (7 أرقام على الأقل)';
+        // Country is mandatory and must be a valid ISO code from the dropdown
+        if (!isValidCountryCode($country)) $errors[] = 'يجب اختيار البلد من القائمة';
         $pwErrors = validate_password($password);
         if ($pwErrors) $errors = array_merge($errors, $pwErrors);
 
@@ -92,20 +100,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $affId = $referringAffiliate['id'] ?? null;
             $referredAt = $affId ? date('Y-m-d H:i:s') : null;
 
-            $stmt = $pdo->prepare('INSERT INTO stores (business_type_id, name, slug, email, password, phone, plan_id, affiliate_id, referred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-            $stmt->execute([$businessTypeId, $name, $slug, $email, $hash, $phone, $freePlan ?: 1, $affId, $referredAt]);
+            // New stores start as is_active=0 + approval_status='pending' until super approves
+            $stmt = $pdo->prepare(
+                'INSERT INTO stores (business_type_id, name, slug, email, password, phone, whatsapp, country, plan_id, affiliate_id, referred_at, is_active, approval_status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
+            );
+            $stmt->execute([
+                $businessTypeId, $name, $slug, $email, $hash, $phone, $whatsapp, $country,
+                $freePlan ?: 1, $affId, $referredAt, 'pending',
+            ]);
             $newId = (int) $pdo->lastInsertId();
-            regenerate_session_id();
-            $_SESSION['store_id'] = $newId;
-            security_log($pdo, 'store_registered', 'info',
+            // DO NOT log the user in — wait for approval. Use a one-time session
+            // hint so admin/pending.php can show the right message.
+            $_SESSION['pending_store_email'] = $email;
+            $_SESSION['pending_store_whatsapp'] = $whatsapp;
+            security_log($pdo, 'store_registered_pending', 'info',
                 ['email' => $email, 'business_type_id' => $businessTypeId, 'affiliate_id' => $affId],
                 'store', $newId);
+
+            // Telegram notification (silently best-effort — never blocks the response)
+            $bizName = '';
+            foreach ($businessTypes as $bt) {
+                if ((int) $bt['id'] === $businessTypeId) { $bizName = $bt['name_ar']; break; }
+            }
+            tgNotifyEvent($pdo, 'store_signup', [
+                'id'       => $newId,
+                'name'     => $name,
+                'email'    => $email,
+                'whatsapp' => $whatsapp,
+                'country'  => countryName($country),
+                'biz_name' => $bizName,
+            ]);
+
             // Clear the ref cookie since it's now consumed
             if ($affId) {
                 setcookie('qrs_ref', '', ['expires' => time() - 3600, 'path' => '/']);
             }
-            flash('success', 'مرحباً بك! ابدأ بإنشاء متجرك — يمكنك الترقية لاحقاً.');
-            redirect(BASE_URL . '/admin/dashboard.php');
+            redirect(BASE_URL . '/admin/pending.php');
         } else {
             keepOld($_POST);
         }
@@ -263,6 +294,33 @@ foreach ($businessTypes as $t) {
                         placeholder="your@email.com">
                 </div>
                 <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">
+                        البلد <span class="text-red-500 font-bold">*</span>
+                    </label>
+                    <select name="country" required
+                        class="w-full px-4 py-3 rounded-xl border-2 border-emerald-200 focus:border-emerald-500 transition bg-white text-gray-900">
+                        <option value="">— اختر البلد —</option>
+                        <?php
+                        $oldCountry = old('country');
+                        // Merge priority + rest into one flat list (Arab countries shown first naturally)
+                        foreach (array_merge($COUNTRIES_PRIORITY, $COUNTRIES_REST) as $code => $name): ?>
+                            <option value="<?= e($code) ?>" <?= $oldCountry === $code ? 'selected' : '' ?>><?= e($name) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">
+                        رقم الواتساب <span class="text-red-500 font-bold">*</span>
+                        <span class="block text-xs text-gray-400 font-normal mt-1">
+                            ضروري للتواصل معك من قبل إدارة المنصة
+                        </span>
+                    </label>
+                    <input type="tel" name="whatsapp" value="<?= e(old('whatsapp')) ?>" required
+                        autocomplete="tel" inputmode="tel" enterkeyhint="next" dir="ltr"
+                        class="w-full px-4 py-3 rounded-xl border-2 border-emerald-200 focus:border-emerald-500 transition"
+                        placeholder="+963 9XX XXX XXX">
+                </div>
+                <div>
                     <label class="block text-sm font-semibold text-gray-700 mb-2">رقم الهاتف <span class="text-gray-400 font-normal">(اختياري)</span></label>
                     <input type="tel" name="phone" value="<?= e(old('phone')) ?>"
                         autocomplete="tel" inputmode="tel" enterkeyhint="next" dir="ltr"
@@ -275,6 +333,17 @@ foreach ($businessTypes as $t) {
                         autocomplete="new-password" enterkeyhint="done"
                         class="w-full px-4 py-3 rounded-xl border-2 border-gray-100 focus:border-emerald-500 transition"
                         placeholder="8 أحرف على الأقل (حرف + رقم)">
+                </div>
+                <!-- Notice about manual approval -->
+                <div class="rounded-xl bg-amber-50 border border-amber-200 p-3 flex items-start gap-2">
+                    <svg class="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <p class="text-xs text-amber-800 leading-relaxed">
+                        <span class="font-bold">ملاحظة:</span>
+                        بعد إرسال الطلب، سيقوم المشرف بمراجعته ومن ثم تفعيل متجرك.
+                        سنتواصل معك عبر الواتساب لتأكيد البيانات.
+                    </p>
                 </div>
                 <button type="submit" class="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold shadow-lg shadow-emerald-500/30 active:scale-[0.98] hover:shadow-xl sm:hover:scale-[1.02] transition-all">
                     إنشاء الحساب
