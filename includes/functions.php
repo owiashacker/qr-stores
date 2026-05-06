@@ -81,12 +81,82 @@ function generateUniqueSlug($pdo, $name, $excludeId = null)
     }
 }
 
-function uploadImage($fileKey, $targetDir)
+function uploadImage($fileKey, $targetDir, int $maxWidth = 1600, int $jpegQuality = 82)
 {
     $result = secure_upload($fileKey, $targetDir, 5 * 1024 * 1024);
     if ($result === null) return null;
     if (is_array($result) && isset($result['error'])) return false;
+
+    // Compress + resize the uploaded image to keep public-facing pages fast.
+    // - Resizes to max 1600px wide (height auto, never enlarges)
+    // - Re-encodes JPEG at quality 82 (good visual / size tradeoff)
+    // - PNGs stay PNG, but get lossless re-encode + 6-level compression
+    // Failures are silent — original file is preserved.
+    $abs = rtrim($targetDir, '/\\') . '/' . $result;
+    optimizeUploadedImage($abs, $maxWidth, $jpegQuality);
+
     return $result;
+}
+
+/**
+ * Resize + re-encode an image in place. Skips if GD is missing or the file
+ * isn't a recognised image. Never throws — leaves the original on failure.
+ */
+function optimizeUploadedImage(string $path, int $maxWidth = 1600, int $jpegQuality = 82): void
+{
+    if (!extension_loaded('gd') || !is_file($path)) return;
+
+    $info = @getimagesize($path);
+    if (!$info) return;
+    [$origW, $origH] = $info;
+    $type = $info[2];
+
+    // Decode based on type
+    $src = null;
+    switch ($type) {
+        case IMAGETYPE_JPEG: $src = @imagecreatefromjpeg($path); break;
+        case IMAGETYPE_PNG:  $src = @imagecreatefrompng($path);  break;
+        case IMAGETYPE_WEBP:
+            if (function_exists('imagecreatefromwebp')) $src = @imagecreatefromwebp($path);
+            break;
+        case IMAGETYPE_GIF:  $src = @imagecreatefromgif($path);  break;
+        default: return; // unsupported (BMP, AVIF, etc.) — skip
+    }
+    if (!$src) return;
+
+    // Compute target dimensions (only shrink, never enlarge)
+    if ($origW > $maxWidth) {
+        $newW = $maxWidth;
+        $newH = (int) round($origH * ($maxWidth / $origW));
+        $dst  = imagecreatetruecolor($newW, $newH);
+        // Preserve transparency for PNG/GIF
+        if ($type === IMAGETYPE_PNG || $type === IMAGETYPE_GIF) {
+            imagealphablending($dst, false);
+            imagesavealpha($dst, true);
+            $transparent = imagecolorallocatealpha($dst, 0, 0, 0, 127);
+            imagefilledrectangle($dst, 0, 0, $newW, $newH, $transparent);
+        }
+        imagecopyresampled($dst, $src, 0, 0, 0, 0, $newW, $newH, $origW, $origH);
+        imagedestroy($src);
+        $src = $dst;
+    }
+
+    // Re-encode in place
+    switch ($type) {
+        case IMAGETYPE_JPEG:
+            @imagejpeg($src, $path, $jpegQuality);
+            break;
+        case IMAGETYPE_PNG:
+            @imagepng($src, $path, 6); // compression 0-9
+            break;
+        case IMAGETYPE_WEBP:
+            if (function_exists('imagewebp')) @imagewebp($src, $path, $jpegQuality);
+            break;
+        case IMAGETYPE_GIF:
+            @imagegif($src, $path);
+            break;
+    }
+    imagedestroy($src);
 }
 
 function deleteUpload($folder, $filename)

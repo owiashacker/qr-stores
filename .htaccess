@@ -94,3 +94,91 @@ ServerSignature Off
     php_flag session.use_only_cookies on
     php_value session.cookie_samesite "Lax"
 </IfModule>
+
+# ============================================================
+# PERFORMANCE OPTIMIZATIONS
+# ============================================================
+
+# --- Brotli compression (faster than gzip, smaller files) ---
+<IfModule mod_brotli.c>
+    AddOutputFilterByType BROTLI_COMPRESS text/html text/plain text/xml text/css text/javascript application/javascript application/json application/xml application/x-font-ttf application/vnd.ms-fontobject font/opentype image/svg+xml image/x-icon
+</IfModule>
+
+# --- Gzip compression (fallback for older clients) ---
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript
+    AddOutputFilterByType DEFLATE application/javascript application/json application/xml application/xhtml+xml application/rss+xml
+    AddOutputFilterByType DEFLATE application/x-font-ttf application/vnd.ms-fontobject font/opentype
+    AddOutputFilterByType DEFLATE image/svg+xml image/x-icon
+</IfModule>
+
+# --- Browser caching (huge speedup for returning visitors) ---
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresDefault "access plus 1 month"
+
+    # HTML — short cache (always freshest)
+    ExpiresByType text/html "access plus 0 seconds"
+
+    # CSS / JS — 1 month (use ?v= query strings to bust cache)
+    ExpiresByType text/css "access plus 1 month"
+    ExpiresByType application/javascript "access plus 1 month"
+    ExpiresByType text/javascript "access plus 1 month"
+
+    # Images — 1 year (almost never change after upload)
+    ExpiresByType image/jpeg "access plus 1 year"
+    ExpiresByType image/png "access plus 1 year"
+    ExpiresByType image/webp "access plus 1 year"
+    ExpiresByType image/gif "access plus 1 year"
+    ExpiresByType image/svg+xml "access plus 1 year"
+    ExpiresByType image/x-icon "access plus 1 year"
+
+    # Fonts — 1 year
+    ExpiresByType font/woff "access plus 1 year"
+    ExpiresByType font/woff2 "access plus 1 year"
+    ExpiresByType application/font-woff "access plus 1 year"
+    ExpiresByType application/font-woff2 "access plus 1 year"
+    ExpiresByType application/x-font-ttf "access plus 1 year"
+    ExpiresByType application/vnd.ms-fontobject "access plus 1 year"
+
+    # Audio / Video — 1 month
+    ExpiresByType audio/ogg "access plus 1 month"
+    ExpiresByType video/mp4 "access plus 1 month"
+    ExpiresByType video/ogg "access plus 1 month"
+    ExpiresByType video/webm "access plus 1 month"
+</IfModule>
+
+# --- Cache-Control headers (more granular than Expires) ---
+<IfModule mod_headers.c>
+    # Long cache for static assets (immutable = browser never re-validates)
+    <FilesMatch "\.(jpg|jpeg|png|webp|gif|svg|ico|woff|woff2|ttf|otf|eot)$">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+        Header unset ETag
+    </FilesMatch>
+    FileETag None
+
+    # Short cache for CSS/JS (can use ?v= versioning to bust)
+    <FilesMatch "\.(css|js)$">
+        Header set Cache-Control "public, max-age=2592000"
+    </FilesMatch>
+
+    # No cache for HTML/PHP (always fresh)
+    <FilesMatch "\.(html|php)$">
+        Header set Cache-Control "no-cache, no-store, must-revalidate"
+    </FilesMatch>
+
+    # Enable HTTP/2 server push hints for the homepage
+    <FilesMatch "index\.php$">
+        Header add Link "<https://fonts.googleapis.com>; rel=preconnect"
+        Header add Link "<https://fonts.gstatic.com>; rel=preconnect; crossorigin"
+        Header add Link "<https://cdn.tailwindcss.com>; rel=preconnect"
+    </FilesMatch>
+</IfModule>
+
+# --- Disable ETag (we use Cache-Control + Last-Modified instead) ---
+FileETag None
+
+# --- Reduce keep-alive overhead ---
+<IfModule mod_headers.c>
+    Header set Connection keep-alive
+</IfModule>

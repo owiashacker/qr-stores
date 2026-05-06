@@ -141,6 +141,10 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://cdn.tailwindcss.com">
+    <link rel="dns-prefetch" href="https://fonts.googleapis.com">
+    <link rel="dns-prefetch" href="https://fonts.gstatic.com">
+    <link rel="dns-prefetch" href="https://cdn.tailwindcss.com">
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="<?= BASE_URL ?>/assets/css/mobile.css?v=<?= @filemtime(__DIR__ . '/../assets/css/mobile.css') ?: 1 ?>">
@@ -1203,7 +1207,7 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
     <div class="cover-wrap relative">
         <?php if ($r['cover']): ?>
             <!-- Cover image: full natural aspect ratio, never cropped -->
-            <img src="<?= BASE_URL ?>/assets/uploads/covers/<?= e($r['cover']) ?>" class="block w-full h-auto" alt="<?= e($r['name']) ?>">
+            <img src="<?= BASE_URL ?>/assets/uploads/covers/<?= e($r['cover']) ?>" class="block w-full h-auto" alt="<?= e($r['name']) ?>" fetchpriority="high" decoding="async">
         <?php else: ?>
             <!-- No cover: gradient placeholder with fixed responsive height -->
             <div class="h-56 sm:h-72 md:h-96 relative gradient-primary overflow-hidden">
@@ -1240,7 +1244,7 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
             <?php if ($r['logo']): ?>
                 <div class="relative flex-shrink-0">
                     <div class="absolute -inset-1 gradient-primary rounded-2xl blur opacity-30"></div>
-                    <img src="<?= BASE_URL ?>/assets/uploads/logos/<?= e($r['logo']) ?>" class="relative w-16 h-16 sm:w-20 sm:h-20 md:w-28 md:h-28 rounded-2xl object-cover shadow-xl border-2 border-white">
+                    <img src="<?= BASE_URL ?>/assets/uploads/logos/<?= e($r['logo']) ?>" class="relative w-16 h-16 sm:w-20 sm:h-20 md:w-28 md:h-28 rounded-2xl object-cover shadow-xl border-2 border-white" fetchpriority="high" decoding="async" alt="<?= e($r['name']) ?>">
                 </div>
             <?php else: ?>
                 <div class="relative flex-shrink-0">
@@ -1357,7 +1361,7 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
         <article data-item-id="<?= (int) $item['id'] ?>" data-item-name="<?= e(mb_strtolower($item['name'])) ?>" data-item-desc="<?= e(mb_strtolower($item['description'] ?? '')) ?>" class="item-card searchable snap-start flex-shrink-0 w-52 md:w-64 rounded-3xl shadow-soft overflow-hidden group relative">
             <div onclick='showItem(<?= json_encode($item, JSON_UNESCAPED_UNICODE) ?>)' class="img-wrap aspect-square cursor-pointer">
                 <?php if ($item['thumb_url']): ?>
-                    <img src="<?= e($item['thumb_url']) ?>" class="w-full h-full object-cover group-hover:scale-110 transition duration-700" loading="lazy" alt="<?= e($item['name']) ?>">
+                    <img src="<?= e($item['thumb_url']) ?>" class="w-full h-full object-cover group-hover:scale-110 transition duration-700" loading="lazy" decoding="async" alt="<?= e($item['name']) ?>">
                     <div class="img-overlay"></div>
                 <?php else: ?>
                     <div class="empty-img-wrap">
@@ -1411,7 +1415,7 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
                     <div class="flex sm:flex-col">
                         <div onclick='showItem(<?= json_encode($item, JSON_UNESCAPED_UNICODE) ?>)' class="img-wrap w-28 sm:w-full sm:aspect-[4/3] flex-shrink-0 cursor-pointer">
                             <?php if ($item['thumb_url']): ?>
-                                <img src="<?= e($item['thumb_url']) ?>" class="w-full h-full object-cover group-hover:scale-110 transition duration-700" loading="lazy" alt="<?= e($item['name']) ?>">
+                                <img src="<?= e($item['thumb_url']) ?>" class="w-full h-full object-cover group-hover:scale-110 transition duration-700" loading="lazy" decoding="async" alt="<?= e($item['name']) ?>">
                                 <div class="img-overlay"></div>
                                 <span class="peek-hint hidden sm:flex">
                                     <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
