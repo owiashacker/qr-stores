@@ -22,7 +22,6 @@ deployment:
     - /bin/cp -f links.php $DEPLOYPATH
     - /bin/cp -f 404.php $DEPLOYPATH
     - /bin/cp -f demo.php $DEPLOYPATH
-    - /bin/cp -f .htaccess $DEPLOYPATH
     - /bin/cp -f robots.txt $DEPLOYPATH
     - /bin/cp -f ads.txt $DEPLOYPATH
 
@@ -32,11 +31,17 @@ deployment:
     - /bin/cp -f config/.htaccess $DEPLOYPATH/config/.htaccess
 
     # ===========================================================
-    # Production fixes — تعديلات خاصة بالإنتاج
+    # .htaccess — atomic write (sed على نسخة مؤقتة ثم mv ذرّي)
+    # هذا يمنع ظهور 404 "الصفحة غير موجودة" أثناء الـ deploy لأن
+    # mv ذرّي على نفس الـ filesystem (rename syscall) — لا توجد لحظة
+    # يكون فيها الملف نصف مكتوب أو بمسار خاطئ.
     # ===========================================================
-    # 1. أصلح مسارات .htaccess (احذف /qr_stores prefix)
-    - /bin/sed -i 's|/qr_stores/404.php|/404.php|g' $DEPLOYPATH/.htaccess
+    - /bin/cp -f .htaccess $DEPLOYPATH/.htaccess.new
+    - /bin/sed -i 's|/qr_stores/404.php|/404.php|g' $DEPLOYPATH/.htaccess.new
+    - /bin/mv -f $DEPLOYPATH/.htaccess.new $DEPLOYPATH/.htaccess
 
-    # 2. تأكد من صلاحيات public_html
+    # ===========================================================
+    # صلاحيات
+    # ===========================================================
     - /bin/chmod 755 $DEPLOYPATH
     - /bin/chmod 644 $DEPLOYPATH/.htaccess
