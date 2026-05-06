@@ -4,6 +4,19 @@ require_once __DIR__ . '/security.php';
 require_once __DIR__ . '/error_handler.php';
 require_once __DIR__ . '/activity_tracker.php';
 
+// ─── PHP-level output compression (gzip) ────────────────────────────────
+// Last-resort: if Apache mod_deflate is disabled AND .htaccess zlib hint
+// didn't take effect, start an ob_gzhandler buffer ourselves so HTML/JSON
+// responses still get compressed. Halves the typical store page from ~250KB
+// to ~50KB on the wire.
+if (!ob_get_level()
+    && extension_loaded('zlib')
+    && !ini_get('zlib.output_compression')
+    && !headers_sent()
+    && stripos($_SERVER['HTTP_ACCEPT_ENCODING'] ?? '', 'gzip') !== false) {
+    @ob_start('ob_gzhandler');
+}
+
 // Security hardening runs automatically on include (session + headers).
 // errorLogInit replaces the legacy setup_error_handling() — it writes every
 // uncaught exception/fatal to error_logs table and shows a user-friendly page

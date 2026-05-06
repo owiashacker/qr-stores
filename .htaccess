@@ -112,6 +112,12 @@ ServerSignature Off
     AddOutputFilterByType DEFLATE image/svg+xml image/x-icon
 </IfModule>
 
+# --- PHP-level compression (works on shared hosts where mod_deflate is off) ---
+<IfModule mod_php.c>
+    php_flag zlib.output_compression On
+    php_value zlib.output_compression_level 6
+</IfModule>
+
 # --- Browser caching (huge speedup for returning visitors) ---
 <IfModule mod_expires.c>
     ExpiresActive On
