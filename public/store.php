@@ -1155,9 +1155,10 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
             transition: transform .2s;
         }
 
-        /* Scroll reveal */
-        .reveal { opacity: 0; transform: translateY(24px); transition: opacity .55s ease, transform .55s ease; }
-        .reveal.in { opacity: 1; transform: translateY(0); }
+        /* Scroll reveal — only hidden when JS confirms it'll animate them in.
+           Default state is fully visible so images don't wait on IntersectionObserver. */
+        html.js-reveal-ready .reveal { opacity: 0; transform: translateY(24px); transition: opacity .35s ease, transform .35s ease; }
+        html.js-reveal-ready .reveal.in { opacity: 1; transform: translateY(0); }
 
         /* Toast — must sit above EVERY modal/backdrop (cart, item, pre-send, etc.)
            so validation messages like "يرجى تعبئة رقم الهاتف" stay visible when
@@ -1357,11 +1358,16 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
         <span><?= e($publicLabelItems) ?> المميزة</span>
     </h2>
     <div class="flex gap-4 overflow-x-auto scrollbar-hide snap-x snap-mandatory pb-2">
-        <?php foreach ($featured as $item): ?>
+        <?php $__featIdx = 0; foreach ($featured as $item):
+            // First 4 featured items are above the fold → eager-load with high priority.
+            // The rest stay lazy so we don't waste bandwidth on items the user may never see.
+            $__loadAttr = $__featIdx < 4 ? 'fetchpriority="high" decoding="async"' : 'loading="lazy" decoding="async"';
+            $__featIdx++;
+        ?>
         <article data-item-id="<?= (int) $item['id'] ?>" data-item-name="<?= e(mb_strtolower($item['name'])) ?>" data-item-desc="<?= e(mb_strtolower($item['description'] ?? '')) ?>" class="item-card searchable snap-start flex-shrink-0 w-52 md:w-64 rounded-3xl shadow-soft overflow-hidden group relative">
             <div onclick='showItem(<?= json_encode($item, JSON_UNESCAPED_UNICODE) ?>)' class="img-wrap aspect-square cursor-pointer">
                 <?php if ($item['thumb_url']): ?>
-                    <img src="<?= e($item['thumb_url']) ?>" class="w-full h-full object-cover group-hover:scale-110 transition duration-700" loading="lazy" decoding="async" alt="<?= e($item['name']) ?>">
+                    <img src="<?= e($item['thumb_url']) ?>" <?= $__loadAttr ?> class="w-full h-full object-cover group-hover:scale-110 transition duration-700" alt="<?= e($item['name']) ?>">
                     <div class="img-overlay"></div>
                 <?php else: ?>
                     <div class="empty-img-wrap">
@@ -1396,6 +1402,11 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
 
 <!-- Categories + Items -->
 <main class="container max-w-5xl mx-auto px-4 mt-8 space-y-10">
+    <?php
+    // Global counter across all categories — first ~6 item images get eager-loaded
+    // (those most likely above the fold). The rest use lazy + reveal animation.
+    $__catItemIdx = 0;
+    ?>
     <?php foreach ($cats as $cat): ?>
         <?php if (empty($itemsByCategory[$cat['id']])) continue; ?>
         <section id="cat-<?= $cat['id'] ?>" class="scroll-mt-32">
@@ -1410,12 +1421,19 @@ foreach (($publicSchema['fields'] ?? []) as $__sf) {
                 <?php foreach ($itemsByCategory[$cat['id']] as $item):
                     $hasDiscount = $item['old_price'] && $item['old_price'] > $item['price'];
                     $discountPct = $hasDiscount ? round((($item['old_price'] - $item['price']) / $item['old_price']) * 100) : 0;
+                    // Above the fold: eager + high priority + skip reveal animation
+                    $__isAboveFold = $__catItemIdx < 6;
+                    $__loadAttr = $__isAboveFold
+                        ? 'fetchpriority="high" decoding="async"'
+                        : 'loading="lazy" decoding="async"';
+                    $__revealClass = $__isAboveFold ? '' : 'reveal ';
+                    $__catItemIdx++;
                 ?>
-                <article data-item-id="<?= (int) $item['id'] ?>" data-item-name="<?= e(mb_strtolower($item['name'])) ?>" data-item-desc="<?= e(mb_strtolower($item['description'] ?? '')) ?>" class="item-card searchable reveal rounded-3xl shadow-soft overflow-hidden group relative">
+                <article data-item-id="<?= (int) $item['id'] ?>" data-item-name="<?= e(mb_strtolower($item['name'])) ?>" data-item-desc="<?= e(mb_strtolower($item['description'] ?? '')) ?>" class="item-card searchable <?= $__revealClass ?>rounded-3xl shadow-soft overflow-hidden group relative">
                     <div class="flex sm:flex-col">
                         <div onclick='showItem(<?= json_encode($item, JSON_UNESCAPED_UNICODE) ?>)' class="img-wrap w-28 sm:w-full sm:aspect-[4/3] flex-shrink-0 cursor-pointer">
                             <?php if ($item['thumb_url']): ?>
-                                <img src="<?= e($item['thumb_url']) ?>" class="w-full h-full object-cover group-hover:scale-110 transition duration-700" loading="lazy" decoding="async" alt="<?= e($item['name']) ?>">
+                                <img src="<?= e($item['thumb_url']) ?>" <?= $__loadAttr ?> class="w-full h-full object-cover group-hover:scale-110 transition duration-700" alt="<?= e($item['name']) ?>">
                                 <div class="img-overlay"></div>
                                 <span class="peek-hint hidden sm:flex">
                                     <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
@@ -2567,11 +2585,33 @@ async function shareMenu() {
     }
 }
 
-/* --- SCROLL REVEAL --- */
-const io = new IntersectionObserver(entries => {
-    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
-}, { threshold: 0.1 });
-document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+/* --- SCROLL REVEAL ---
+   Skip animation entirely for items already in viewport on first paint —
+   only newly-scrolled-into-view items animate. Saves ~0.5s of perceived delay
+   on the items above the fold (especially featured + first category row). */
+(function () {
+    const all = document.querySelectorAll('.reveal');
+    if (!all.length) return;
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    const offscreen = [];
+    all.forEach(el => {
+        const top = el.getBoundingClientRect().top;
+        if (top < vh + 50) {
+            // Already in / near viewport — show instantly, no animation
+            el.classList.add('in');
+        } else {
+            offscreen.push(el);
+        }
+    });
+    // Only after we've classified, hide the offscreen ones for animation
+    document.documentElement.classList.add('js-reveal-ready');
+    if (offscreen.length) {
+        const io = new IntersectionObserver(entries => {
+            entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+        }, { threshold: 0.1, rootMargin: '50px' });
+        offscreen.forEach(el => io.observe(el));
+    }
+})();
 
 // Initial cart render
 renderCart();
