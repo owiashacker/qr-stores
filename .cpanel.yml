@@ -19,6 +19,7 @@ deployment:
 
     # ملفات الجذر
     - /bin/cp -f index.php $DEPLOYPATH
+    - /bin/cp -f links.php $DEPLOYPATH
     - /bin/cp -f 404.php $DEPLOYPATH
     - /bin/cp -f demo.php $DEPLOYPATH
     - /bin/cp -f .htaccess $DEPLOYPATH
