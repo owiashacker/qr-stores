@@ -5,16 +5,22 @@ require_once __DIR__ . '/error_handler.php';
 require_once __DIR__ . '/activity_tracker.php';
 
 // ─── PHP-level output compression (gzip) ────────────────────────────────
-// Last-resort: if Apache mod_deflate is disabled AND .htaccess zlib hint
-// didn't take effect, start an ob_gzhandler buffer ourselves so HTML/JSON
-// responses still get compressed. Halves the typical store page from ~250KB
-// to ~50KB on the wire.
-if (!ob_get_level()
-    && extension_loaded('zlib')
+// Last-resort compression for shared hosts where neither mod_deflate nor
+// php_flag in .htaccess is honoured. Tries two approaches in order:
+//   1. ini_set(zlib.output_compression) — preferred (Apache handles it natively)
+//   2. ob_start('ob_gzhandler')          — fallback (works in any SAPI)
+// Both are guarded against cases where compression is already active.
+if (extension_loaded('zlib')
     && !ini_get('zlib.output_compression')
-    && !headers_sent()
     && stripos($_SERVER['HTTP_ACCEPT_ENCODING'] ?? '', 'gzip') !== false) {
-    @ob_start('ob_gzhandler');
+    // First try: ask PHP runtime to enable native compression
+    @ini_set('zlib.output_compression', 'On');
+    @ini_set('zlib.output_compression_level', '6');
+    // If runtime ini_set was rejected (still off), fall back to ob_gzhandler.
+    // Stack it on top of any existing default buffer — harmless if redundant.
+    if (!ini_get('zlib.output_compression')) {
+        @ob_start('ob_gzhandler');
+    }
 }
 
 // Security hardening runs automatically on include (session + headers).
