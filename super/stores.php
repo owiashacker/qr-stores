@@ -122,6 +122,8 @@ if ($search) { $sql .= ' AND (r.name LIKE ? OR r.email LIKE ? OR r.slug LIKE ?)'
 if ($planFilter) { $sql .= ' AND r.plan_id = ?'; $params[] = $planFilter; }
 if ($status === 'active') $sql .= ' AND r.is_active = 1';
 elseif ($status === 'inactive') $sql .= ' AND r.is_active = 0';
+elseif ($status === 'rejected') $sql .= " AND r.approval_status = 'rejected'";
+elseif ($status === 'pending')  $sql .= " AND r.approval_status = 'pending'";
 if ($affFilter > 0) { $sql .= ' AND r.affiliate_id = ?'; $params[] = $affFilter; }
 elseif ($affFilter === -1) { $sql .= ' AND r.affiliate_id IS NULL'; }
 $sql .= ' ORDER BY r.created_at DESC';
@@ -300,8 +302,10 @@ function closeRejectModal() {
         </select>
         <select name="status" class="px-4 py-2.5 rounded-xl border-2 font-semibold">
             <option value="">كل الحالات</option>
-            <option value="active" <?= $status === 'active' ? 'selected' : '' ?>>نشط</option>
+            <option value="active"   <?= $status === 'active'   ? 'selected' : '' ?>>نشط</option>
             <option value="inactive" <?= $status === 'inactive' ? 'selected' : '' ?>>موقوف</option>
+            <option value="pending"  <?= $status === 'pending'  ? 'selected' : '' ?>>بانتظار الموافقة</option>
+            <option value="rejected" <?= $status === 'rejected' ? 'selected' : '' ?>>مرفوض</option>
         </select>
         <select name="affiliate" class="px-4 py-2.5 rounded-xl border-2 font-semibold">
             <option value="0">كل المتاجر (وسطاء)</option>
@@ -443,7 +447,26 @@ function closeRejectModal() {
                         </div>
                     </td>
                     <td class="py-4 px-4">
-                        <?php if (!$rest['is_active']): ?>
+                        <?php if (($rest['approval_status'] ?? '') === 'rejected'): ?>
+                            <div class="flex items-center gap-2">
+                                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-red-500/15 text-red-400 text-xs font-black border border-red-500/30">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"/></svg>
+                                    مرفوض
+                                </span>
+                                <?php if (!empty($rest['rejection_reason'])): ?>
+                                    <button type="button"
+                                            onclick='openReasonModal(<?= json_encode($rest['name'], JSON_UNESCAPED_UNICODE | JSON_HEX_APOS) ?>, <?= json_encode($rest['rejection_reason'], JSON_UNESCAPED_UNICODE | JSON_HEX_APOS) ?>)'
+                                            class="p-1 rounded-md hover:bg-white/10 text-amber-400" title="عرض سبب الرفض">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                    </button>
+                                <?php endif; ?>
+                            </div>
+                        <?php elseif (($rest['approval_status'] ?? '') === 'pending'): ?>
+                            <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/15 text-amber-400 text-xs font-black border border-amber-500/30">
+                                <svg class="w-3 h-3 animate-pulse" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>
+                                بانتظار الموافقة
+                            </span>
+                        <?php elseif (!$rest['is_active']): ?>
                             <span class="inline-flex items-center gap-1 text-gray-500 text-xs font-bold"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>موقوف</span>
                         <?php elseif ($rest['is_expired']): ?>
                             <span class="inline-flex items-center gap-1 text-red-400 text-xs font-bold"><span class="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span>منتهي</span>
@@ -537,6 +560,41 @@ function closeRejectModal() {
         </form>
     </div>
 </div>
+
+<!-- View Rejection Reason Modal (always present, opened from rejected-status badge) -->
+<div id="reasonModal" class="fixed inset-0 bg-black/70 z-50 hidden items-center justify-center p-4" onclick="if(event.target===this)closeReasonModal()">
+    <div class="bg-gray-900 border border-red-500/30 rounded-2xl p-6 max-w-md w-full">
+        <div class="flex items-start gap-3 mb-4">
+            <div class="w-10 h-10 rounded-xl bg-red-500/20 text-red-400 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            </div>
+            <div class="flex-1 min-w-0">
+                <h3 class="text-base font-black text-white mb-1">سبب رفض المتجر</h3>
+                <p class="text-xs text-gray-400 truncate">المتجر: <span id="reasonStoreName" class="text-red-400 font-bold"></span></p>
+            </div>
+        </div>
+        <div class="rounded-xl bg-red-500/10 border border-red-500/30 p-4 mb-4">
+            <p id="reasonText" class="text-sm text-red-200 leading-relaxed whitespace-pre-wrap"></p>
+        </div>
+        <div class="flex justify-end">
+            <button type="button" onclick="closeReasonModal()" class="px-5 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-gray-200 font-bold">إغلاق</button>
+        </div>
+    </div>
+</div>
+<script>
+function openReasonModal(name, reason) {
+    const m = document.getElementById('reasonModal');
+    document.getElementById('reasonStoreName').textContent = name;
+    document.getElementById('reasonText').textContent = reason || '— لم يُحدّد سبب —';
+    m.classList.remove('hidden');
+    m.classList.add('flex');
+}
+function closeReasonModal() {
+    const m = document.getElementById('reasonModal');
+    m.classList.add('hidden');
+    m.classList.remove('flex');
+}
+</script>
 
 <!-- Reset Password Modal -->
 <div id="resetPwdModal" class="fixed inset-0 bg-black/70 z-50 hidden items-center justify-center p-4" onclick="if(event.target===this)closeResetPwdModal()">
