@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/telegram.php';
+require_once __DIR__ . '/../includes/expiry_bot.php';
 requireAdminLogin();
 $pageTitle = 'إعدادات المنصة';
 
@@ -12,12 +13,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
             'site_name', 'site_tagline', 'site_description', 'contact_email', 'contact_whatsapp',
             'primary_color', 'footer_text', 'watermark_text', 'currency_symbol', 'bank_details',
             'allow_registration', 'allowed_payment_methods',
-            // Telegram bot integration
+            // Telegram bot integration (signup / upgrade events)
             'telegram_enabled', 'telegram_bot_token', 'telegram_chat_id',
             'telegram_notify_store_signup', 'telegram_notify_plan_upgrade',
+            // Expiry-reminder bot (separate from the signup bot)
+            'expiry_bot_enabled', 'expiry_bot_token', 'expiry_bot_chat_id',
+            // site_url is needed by expiry bot for inline-keyboard deep links
+            'site_url',
         ];
         // Checkbox keys default to '0' when unchecked (browsers omit unchecked checkboxes)
-        $checkboxKeys = ['telegram_enabled', 'telegram_notify_store_signup', 'telegram_notify_plan_upgrade'];
+        $checkboxKeys = [
+            'telegram_enabled', 'telegram_notify_store_signup', 'telegram_notify_plan_upgrade',
+            'expiry_bot_enabled',
+        ];
 
         $stmt = $pdo->prepare('INSERT INTO site_settings (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)');
         foreach ($allowedKeys as $key) {
@@ -36,6 +44,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
             flash('success', 'تم إرسال رسالة اختبار إلى تيليغرام بنجاح ✓ تحقّق من قناتك.');
         } else {
             flash('error', '✕ فشل إرسال رسالة الاختبار. تحقّق من Token + Chat ID وأن البوت مُفعّل.');
+        }
+    } elseif ($action === 'test_expiry_bot') {
+        // Send a self-contained test that doesn't touch the notifications log
+        $ok = expirySend($pdo,
+            "✅ <b>اختبار بوت تذكيرات الانتهاء</b>\n\n"
+          . "إذا وصلتك هذه الرسالة، فالبوت مرتبط بشكل صحيح.\n"
+          . "الوقت: " . date('Y-m-d H:i:s')
+        );
+        if ($ok) {
+            flash('success', '✓ تم إرسال اختبار بوت التذكيرات بنجاح. تحقّق من القناة.');
+        } else {
+            flash('error', '✕ فشل إرسال اختبار بوت التذكيرات. تحقّق من Token + Chat ID وأنّه مُفعّل.');
         }
     } elseif ($action === 'change_password') {
         $current = $_POST['current_password'] ?? '';
@@ -230,6 +250,107 @@ require __DIR__ . '/../includes/header_super.php';
         <div class="flex justify-end">
             <button type="submit" class="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold shadow text-sm">
                 ✈ اختبار البوت (إرسال رسالة)
+            </button>
+        </div>
+    </form>
+
+    <!-- ════════════════════════════════════════════════════════════
+         بوت تذكيرات انتهاء الاشتراك (مستقل تماماً عن بوت التسجيل)
+         ════════════════════════════════════════════════════════════ -->
+    <form method="POST">
+        <?= csrfField() ?>
+        <input type="hidden" name="action" value="save_settings">
+
+        <div class="card rounded-2xl p-6 md:p-8 mb-6">
+            <h3 class="text-lg font-bold text-white mb-1">⏰ بوت تذكيرات الاشتراك</h3>
+            <p class="text-sm text-gray-500 mb-6">
+                بوت <b>منفصل</b> يرسل تنبيه قبل انتهاء كل اشتراك (بـ 7 / 3 / 1 يوم) +
+                يوم الانتهاء + بعد الانتهاء بـ 1 و 7 أيام. كل رسالة تتضمّن
+                زر <b>"إرسال تذكير على واتساب"</b> برسالة عربية جاهزة.
+            </p>
+
+            <div class="rounded-xl bg-amber-500/10 border border-amber-500/30 p-4 mb-5 text-xs text-amber-200 leading-relaxed">
+                <p class="font-bold text-amber-300 mb-2">لماذا بوت منفصل؟</p>
+                <ul class="space-y-1 list-disc list-inside">
+                    <li>تنبيهات التسجيل + الترقية فورية وتحتاج رد سريع.</li>
+                    <li>تذكيرات الانتهاء يومية، ممكن تذهب لقناة مختلفة (مثلاً: قناة المتابعة اليومية).</li>
+                    <li>تقدر تكتم أحدهما دون التأثير على الثاني.</li>
+                </ul>
+                <p class="font-bold text-amber-300 mt-3 mb-1">طريقة الإعداد:</p>
+                <ol class="space-y-1 list-decimal list-inside">
+                    <li>أنشئ بوت ثاني عبر <span class="font-mono bg-white/10 px-1 rounded">@BotFather</span> (يفضّل اسم مختلف مثلاً <span dir="ltr" class="font-mono">QRStoresExpiry</span>).</li>
+                    <li>افتح محادثة معه وأرسل أي رسالة.</li>
+                    <li>انسخ Token + Chat ID كما فعلت مع البوت الأول.</li>
+                </ol>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="md:col-span-2">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" name="expiry_bot_enabled" value="1"
+                               <?= ($settings['expiry_bot_enabled'] ?? '0') === '1' ? 'checked' : '' ?>
+                               class="w-5 h-5 rounded">
+                        <span class="text-sm font-bold text-white">تفعيل بوت التذكيرات</span>
+                    </label>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold text-gray-300 mb-2">Bot Token</label>
+                    <input type="text" name="expiry_bot_token" dir="ltr"
+                           value="<?= e($settings['expiry_bot_token'] ?? '') ?>"
+                           placeholder="123456789:ABCdefGHI..."
+                           class="w-full px-4 py-3 rounded-xl border-2 font-mono text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-gray-300 mb-2">Chat ID</label>
+                    <input type="text" name="expiry_bot_chat_id" dir="ltr"
+                           value="<?= e($settings['expiry_bot_chat_id'] ?? '') ?>"
+                           placeholder="123456789"
+                           class="w-full px-4 py-3 rounded-xl border-2 font-mono text-sm">
+                </div>
+
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-semibold text-gray-300 mb-2">
+                        رابط الموقع
+                        <span class="text-xs text-gray-500 font-normal">(يستخدم في زر "عرض المتجر بالإدارة")</span>
+                    </label>
+                    <input type="text" name="site_url" dir="ltr"
+                           value="<?= e($settings['site_url'] ?? '') ?>"
+                           placeholder="https://qr-stores.com"
+                           class="w-full px-4 py-3 rounded-xl border-2 font-mono text-sm">
+                </div>
+
+                <div class="md:col-span-2 mt-2 p-4 rounded-xl bg-white/5">
+                    <p class="text-sm font-bold text-gray-300 mb-2">📋 جدول التذكيرات المُرسَلة تلقائياً:</p>
+                    <ul class="text-xs text-gray-400 space-y-1.5">
+                        <li>🔔 <b class="text-emerald-300">قبل 7 أيام</b> — تنبيه ودّي مع نظرة على إنجازات المتجر</li>
+                        <li>⚠️ <b class="text-amber-300">قبل 3 أيام</b> — تذكير مع توضيح ماذا سيخسر</li>
+                        <li>🚨 <b class="text-orange-300">قبل يوم واحد</b> — لحظة حاسمة</li>
+                        <li>🛑 <b class="text-red-300">يوم الانتهاء</b> — آخر فرصة قبل التحويل التلقائي</li>
+                        <li>😔 <b class="text-gray-300">بعد يوم</b> — متجرك ما زال يعمل لكن بصلاحيات محدودة</li>
+                        <li>💔 <b class="text-pink-300">بعد 7 أيام</b> — عرض استرجاعي بخصم 20%</li>
+                    </ul>
+                    <p class="text-[11px] text-gray-500 mt-3">
+                        ⚙️ لتشغيل التذكيرات يومياً، أضف في cPanel Cron Jobs:<br>
+                        <span class="font-mono bg-white/10 px-1 rounded text-[10px]" dir="ltr">
+                            0 9 * * * /usr/local/bin/php $HOME/public_html/cron/check_expiry.php
+                        </span>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex justify-end gap-2">
+            <button type="submit" class="px-8 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold shadow-lg">حفظ الإعدادات</button>
+        </div>
+    </form>
+
+    <form method="POST" class="-mt-4">
+        <?= csrfField() ?>
+        <input type="hidden" name="action" value="test_expiry_bot">
+        <div class="flex justify-end">
+            <button type="submit" class="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold shadow text-sm">
+                ⏰ اختبار بوت التذكيرات
             </button>
         </div>
     </form>
