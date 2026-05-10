@@ -9,6 +9,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
     $action = $_POST['action'] ?? '';
 
     if ($action === 'save_settings') {
+        // Whitelist of every key any form on this page is allowed to touch.
         $allowedKeys = [
             'site_name', 'site_tagline', 'site_description', 'contact_email', 'contact_whatsapp',
             'primary_color', 'footer_text', 'watermark_text', 'currency_symbol', 'bank_details',
@@ -18,21 +19,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
             'telegram_notify_store_signup', 'telegram_notify_plan_upgrade',
             // Expiry-reminder bot (separate from the signup bot)
             'expiry_bot_enabled', 'expiry_bot_token', 'expiry_bot_chat_id',
-            // site_url is needed by expiry bot for inline-keyboard deep links
+            // Site URL — needed by expiry bot for inline-keyboard deep links
             'site_url',
         ];
-        // Checkbox keys default to '0' when unchecked (browsers omit unchecked checkboxes)
+        // Checkbox keys default to '0' when unchecked (browsers omit unchecked checkboxes).
         $checkboxKeys = [
             'telegram_enabled', 'telegram_notify_store_signup', 'telegram_notify_plan_upgrade',
             'expiry_bot_enabled',
         ];
 
+        // CRITICAL: each form on this page declares which keys IT owns via a
+        // hidden `_form_keys` input. Without this, submitting the "expiry bot"
+        // form would wipe the "telegram bot" fields (and vice-versa) because
+        // the loop would write empty strings for keys not present in the form.
+        $declared = $_POST['_form_keys'] ?? '';
+        $formKeys = array_filter(array_map('trim', explode(',', (string) $declared)));
+        $keysToSave = $formKeys
+            ? array_intersect($allowedKeys, $formKeys)
+            : $allowedKeys; // backward-compat fallback if a legacy form omits the hint
+
         $stmt = $pdo->prepare('INSERT INTO site_settings (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)');
-        foreach ($allowedKeys as $key) {
+        foreach ($keysToSave as $key) {
             if (in_array($key, $checkboxKeys, true)) {
+                // Only treat checkbox as "0" if the form actually owns it AND it's missing.
                 $value = !empty($_POST[$key]) ? '1' : '0';
             } else {
-                $value = $_POST[$key] ?? '';
+                // Skip if the field literally doesn't exist in this form's submission.
+                if (!array_key_exists($key, $_POST)) continue;
+                $value = $_POST[$key];
                 if (is_array($value)) $value = implode(',', $value);
             }
             $stmt->execute([$key, $value]);
@@ -90,6 +104,9 @@ require __DIR__ . '/../includes/header_super.php';
     <form method="POST">
         <?= csrfField() ?>
         <input type="hidden" name="action" value="save_settings">
+        <!-- Declare which keys this form owns so the handler doesn't wipe
+             unrelated keys (like the expiry bot) that live in another form. -->
+        <input type="hidden" name="_form_keys" value="site_name,site_tagline,site_description,contact_email,contact_whatsapp,primary_color,footer_text,watermark_text,currency_symbol,bank_details,allow_registration,allowed_payment_methods,telegram_enabled,telegram_bot_token,telegram_chat_id,telegram_notify_store_signup,telegram_notify_plan_upgrade">
 
         <div class="card rounded-2xl p-6 md:p-8 mb-6">
             <h3 class="text-lg font-bold text-white mb-1">معلومات المنصة</h3>
@@ -260,6 +277,9 @@ require __DIR__ . '/../includes/header_super.php';
     <form method="POST">
         <?= csrfField() ?>
         <input type="hidden" name="action" value="save_settings">
+        <!-- This form ONLY touches the expiry bot keys + site_url so submitting
+             it doesn't wipe the signup/upgrade bot's token + chat_id. -->
+        <input type="hidden" name="_form_keys" value="expiry_bot_enabled,expiry_bot_token,expiry_bot_chat_id,site_url">
 
         <div class="card rounded-2xl p-6 md:p-8 mb-6">
             <h3 class="text-lg font-bold text-white mb-1">⏰ بوت تذكيرات الاشتراك</h3>
