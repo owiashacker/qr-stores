@@ -159,9 +159,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrfCheck()) {
         $paidAt   = $paidAt ? date('Y-m-d H:i:s', strtotime($paidAt)) : date('Y-m-d H:i:s');
 
         if ($id && $amount > 0) {
-            $pdo->prepare('UPDATE payments SET amount = ?, payment_method = ?, payment_reference = ?, notes = ?, paid_at = ? WHERE id = ?')
-                ->execute([$amount, $method ?: null, $ref ?: null, $notes ?: null, $paidAt, $id]);
-            flash('success', 'تم تعديل الدفعة');
+            // Look up the existing payment to recompute affiliate commission.
+            // The commission rate stays frozen at the value set when the payment
+            // was created — only the AMOUNT (rate × new_amount) gets recomputed.
+            $existing = $pdo->prepare(
+                'SELECT amount, affiliate_id, affiliate_commission_rate, affiliate_amount, affiliate_paid
+                 FROM payments WHERE id = ? LIMIT 1'
+            );
+            $existing->execute([$id]);
+            $cur = $existing->fetch();
+
+            $newCommission = null;
+            $commissionChanged = false;
+
+            if ($cur && $cur['affiliate_id'] && $cur['affiliate_commission_rate'] !== null) {
+                $newCommission = round($amount * (float) $cur['affiliate_commission_rate'] / 100, 2);
+                if ((float) ($cur['affiliate_amount'] ?? 0) !== $newCommission) {
+                    $commissionChanged = true;
+                }
+            }
+
+            // Always include affiliate_amount in the UPDATE so a payment that
+            // *had* an affiliate but where amount dropped to zero still gets a
+            // correctly recomputed commission (or null if no affiliate).
+            $pdo->prepare(
+                'UPDATE payments
+                 SET amount = ?, payment_method = ?, payment_reference = ?, notes = ?, paid_at = ?,
+                     affiliate_amount = ?
+                 WHERE id = ?'
+            )->execute([
+                $amount, $method ?: null, $ref ?: null, $notes ?: null, $paidAt,
+                $newCommission, $id,
+            ]);
+
+            $msg = 'تم تعديل الدفعة';
+            if ($commissionChanged && $newCommission !== null) {
+                $msg .= ' — تم تحديث عمولة الوسيط إلى ' . number_format($newCommission, 2)
+                      . ' (' . number_format((float) $cur['affiliate_commission_rate'], 2) . '٪)';
+                if ((int) ($cur['affiliate_paid'] ?? 0) === 1) {
+                    $msg .= ' ⚠ ملاحظة: هذه العمولة كانت مُعلَّمة كمدفوعة سابقاً، تحقّق منها يدوياً.';
+                }
+            }
+            flash('success', $msg);
         }
     }
 
